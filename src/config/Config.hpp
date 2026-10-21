@@ -30,10 +30,19 @@ namespace pe {
         double baseline = 95.0;          // mm
     };
 
+    struct PlaneParams {
+        double threshold = 2.5; // mm
+        double perpendicularityLimit = 0.35;  
+        int iterations = 500;
+        int minInIiers = 4;
+        int maxFaces = 3;
+    };
+
     struct Config {
         CornerParams corners;
         StereoParams stereo;
         CameraParams camera;
+        PlaneParams planes;
     };
 
 }  // namespace pe

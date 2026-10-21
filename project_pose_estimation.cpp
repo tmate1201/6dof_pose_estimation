@@ -24,6 +24,8 @@
 #include "src/features/ShiTomasi.hpp"
 #include "src/stereo/StereoMatcher.hpp"
 #include "Object_isolation.hpp"
+#include "PlaneFit.hpp"
+#include "PlaneFitTest.hpp"
 
 namespace {
 
@@ -112,6 +114,26 @@ namespace {
             cv::waitKey(0);
         }
     }
+
+    void showFaces(const cv::Mat& left, const std::vector<pe::Plane>& faces, const std::vector<cv::Point3d>& points, const pe::CameraParams& cam) {
+        cv::Mat img;
+        left.convertTo(img, CV_8U);
+        cv::cvtColor(img, img, cv::COLOR_GRAY2BGR);
+        
+        std::vector<cv::Scalar> colors = {cv::Scalar(255,0,0), cv::Scalar(0,255,0), cv::Scalar(0,0,255)};
+
+        for (int i = 0; i < faces.size(); i++) {
+            for (int k = 0; k < faces[i].indices.size(); k++) {
+
+                const cv::Point px = pe::project(points[faces[i].indices[k]], cam);
+                cv::circle(img, px, 5, colors[i], cv::FILLED, cv::LINE_AA);
+
+
+            }
+        }
+        cv::imshow("windowName", img);
+        cv::waitKey(0);
+    }
     // Same 
     /*void saveMatchesCsv(const std::string& path, const std::vector<pe::StereoMatch>& matches) {
         std::ofstream f(path);
@@ -178,7 +200,11 @@ int main(int argc, char** argv) {
         // ---- Step 3 onwards: triangulation, cube segmentation, planes, pose ----
         // (next modules: src/reconstruction, src/geometry, ...)
         std::vector<cv::Point3d> cluster = pe::dbScan(matches, cfg.camera, 25, 4);
-        showCluster(left, cluster, cfg.camera);
+        std::vector<pe::Plane> faces = pe::fitFaces(cluster, cfg.planes);
+
+        std::cout << "FACES: " << faces.size() << std::endl;
+
+        showFaces(left, faces, cluster, cfg.camera);
 
         std::cout << "Results written to " << outDir << "/\n";
         if (show) {
@@ -192,4 +218,5 @@ int main(int argc, char** argv) {
         std::cerr << "Error: " << e.what() << "\n";
         return 1;
     }
+    
 }

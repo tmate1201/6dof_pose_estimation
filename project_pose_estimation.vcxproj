@@ -133,6 +133,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Object_isolation.cpp" />
+    <ClCompile Include="PlaneFit.cpp" />
+    <ClCompile Include="PlaneFitTest.cpp" />
     <ClCompile Include="project_pose_estimation.cpp" />
     <ClCompile Include="src\features\Filters.cpp" />
     <ClCompile Include="src\features\ShiTomasi.cpp" />
@@ -141,6 +143,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Object_isolation.hpp" />
+    <ClInclude Include="PlaneFit.hpp" />
+    <ClInclude Include="PlaneFitTest.hpp" />
     <ClInclude Include="src\core\Types.hpp" />
     <ClInclude Include="src\config\Config.hpp" />
     <ClInclude Include="src\features\Filters.hpp" />

@@ -1,4 +1,5 @@
 #pragma once
+#include <opencv2/opencv.hpp>
 // Data passed between pipeline steps. Images themselves are cv::Mat.
 
 namespace pe {
@@ -28,5 +29,13 @@ namespace pe {
         int matched = 0;
     };
 
+    struct Plane {
+        cv::Point3d normal;
+        cv::Point3d centroid;
+        std::vector<int> indices;
+        double d;
+        double rms;
+        bool valid = false;
+    };
 
 }  
