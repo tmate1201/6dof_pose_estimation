@@ -20,8 +20,10 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include "src/report/ReportFigures.hpp"
 #include "src/config/Config.hpp"
 #include "src/features/ShiTomasi.hpp"
+#include "src/features/Harris.hpp"
 #include "src/stereo/StereoMatcher.hpp"
 #include "Object_isolation.hpp"
 #include "PlaneFit.hpp"
@@ -157,6 +159,7 @@ namespace {
 
 int main(int argc, char** argv) {
     try {
+        return pe::report::writeTriangulationReport("data", "results/report");
         std::vector<std::string> args(argv + 1, argv + argc);
         const bool show = std::find(args.begin(), args.end(), "--no-show") == args.end();
         args.erase(std::remove(args.begin(), args.end(), "--no-show"), args.end());

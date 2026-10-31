@@ -139,6 +139,7 @@
     <ClCompile Include="src\features\Filters.cpp" />
     <ClCompile Include="src\features\Harris.cpp" />
     <ClCompile Include="src\features\ShiTomasi.cpp" />
+    <ClCompile Include="src\report\ReportFigures.cpp" />
     <ClCompile Include="src\reconstruction\Triangulation.cpp" />
     <ClCompile Include="src\stereo\StereoMatcher.cpp" />
   </ItemGroup>
@@ -151,6 +152,7 @@
     <ClInclude Include="src\features\Filters.hpp" />
     <ClInclude Include="src\features\Harris.hpp" />
     <ClInclude Include="src\features\ShiTomasi.hpp" />
+    <ClInclude Include="src\report\ReportFigures.hpp" />
     <ClInclude Include="src\reconstruction\Triangulation.hpp" />
     <ClInclude Include="src\stereo\StereoMatcher.hpp" />
   </ItemGroup>

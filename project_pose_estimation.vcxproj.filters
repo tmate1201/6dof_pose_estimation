@@ -45,6 +45,9 @@
     <ClCompile Include="src\features\Harris.cpp">
       <Filter>Source Files\features</Filter>
     </ClCompile>
+    <ClCompile Include="src\report\ReportFigures.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\stereo\StereoMatcher.cpp">
       <Filter>Source Files\stereo</Filter>
     </ClCompile>
@@ -76,6 +79,9 @@
     </ClInclude>
     <ClInclude Include="src\features\Harris.hpp">
       <Filter>Header Files\features</Filter>
+    </ClInclude>
+    <ClInclude Include="src\report\ReportFigures.hpp">
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\stereo\StereoMatcher.hpp">
       <Filter>Header Files\stereo</Filter>
