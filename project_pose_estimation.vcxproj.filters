@@ -42,6 +42,9 @@
     <ClCompile Include="src\features\ShiTomasi.cpp">
       <Filter>Source Files\features</Filter>
     </ClCompile>
+    <ClCompile Include="src\features\Harris.cpp">
+      <Filter>Source Files\features</Filter>
+    </ClCompile>
     <ClCompile Include="src\stereo\StereoMatcher.cpp">
       <Filter>Source Files\stereo</Filter>
     </ClCompile>
@@ -69,6 +72,9 @@
       <Filter>Header Files\features</Filter>
     </ClInclude>
     <ClInclude Include="src\features\ShiTomasi.hpp">
+      <Filter>Header Files\features</Filter>
+    </ClInclude>
+    <ClInclude Include="src\features\Harris.hpp">
       <Filter>Header Files\features</Filter>
     </ClInclude>
     <ClInclude Include="src\stereo\StereoMatcher.hpp">
