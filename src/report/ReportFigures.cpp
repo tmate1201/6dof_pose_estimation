@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <vector>
 
@@ -25,15 +26,29 @@ namespace pe::report {
 namespace {
 
     // ---------------------------------------------------------------- settings
-    // Crop used for all figures (left image): x 380..1059, y 0..469
-    const cv::Rect kCrop(380, 0, 680, 470);
+    // Image pair used for the report (in dataDir)
+    const std::string kLeftFile = "left_015.png";
+    const std::string kRightFile = "right_015.png";
+
+    // Crop used for all cropped figures (left image): x 420..1099, y 230..679
+    const cv::Rect kCrop(420, 230, 680, 450);
 
     // Hand-drawn bounding boxes around the cube, for the "on cube" counts
-    const cv::Rect kCubeLeft(690, 190, 296, 261);    // x 690..985, y 190..450
-    const cv::Rect kCubeRight(400, 190, 266, 261);   // x 400..665, y 190..450
+    const cv::Rect kCubeLeft(735, 362, 238, 255);    // x 735..972, y 362..616
+    const cv::Rect kCubeRight(488, 362, 218, 255);   // x 488..705, y 362..616
 
-    // Wall region for the score statistics (left image): x 400..999, y 20..179
-    const cv::Rect kWall(400, 20, 600, 160);
+    // Wall region for the score statistics (left image): x 300..999, y 100..339
+    const cv::Rect kWall(300, 100, 700, 240);
+
+    // DBSCAN parameters used in main()
+    const double kDbEps = 25.0;   // mm
+    const int kDbMinPts = 4;
+
+    // Name of a visible cube face from its normal (left camera frame: X right, Y down, Z forward)
+    const char* faceName(const cv::Point3d& n) {
+        if (n.y < -0.5) return "top";
+        return n.x < 0.0 ? "left side" : "right side";
+    }
 
     const double kLogMin = -5.0;      // lower end of the log colour scale
     const double kSharedDist = 2.0;   // px, "shared" corners
@@ -211,8 +226,8 @@ namespace {
 }  // namespace
 
 int writeFeatureDetectionReport(const std::string& dataDir, const std::string& outDir) {
-    const cv::Mat left = loadGray(dataDir + "/left_001.png");
-    const cv::Mat right = loadGray(dataDir + "/right_001.png");
+    const cv::Mat left = loadGray(dataDir + "/" + kLeftFile);
+    const cv::Mat right = loadGray(dataDir + "/" + kRightFile);
     if (left.empty() || right.empty()) {
         std::cerr << "writeFeatureDetectionReport: cannot read images in " << dataDir << "\n";
         return 1;
@@ -228,6 +243,9 @@ int writeFeatureDetectionReport(const std::string& dataDir, const std::string& o
     std::vector<Corner> shiL, harL;
     const ImageResult rl = analyse(left, kCubeLeft, p, border, &S, &R, &shiL, &harL);
     const ImageResult rr = analyse(right, kCubeRight, p, border);
+
+    // ---- figure: the stereo pair, left | right
+    cv::imwrite(outDir + "/stereo_pair_rubiks_test.png", sideBySide(toBgr(left), toBgr(right), 20));
 
     // ---- figures: corner overlays
     cv::imwrite(outDir + "/rubik_corners_shitomasi.png", drawCorners(left, shiL, {0, 255, 0}));
@@ -265,7 +283,7 @@ int writeFeatureDetectionReport(const std::string& dataDir, const std::string& o
 
     // ---- report values
     std::ostringstream o;
-    o << "Feature detection report values (left_001.png / right_001.png)\n"
+    o << "Feature detection report values (" << kLeftFile << " / " << kRightFile << ")\n"
       << "Parameters: window " << p.window << "x" << p.window << ", q = " << p.quality
       << ", minDist = " << p.minDist << " px, border = " << border << " px, maxCorners = " << p.maxCorners
       << ", Harris k = " << p.harrisK << "\n\n";
@@ -298,13 +316,13 @@ namespace {
     // Example corners (left image) for the ZNCC curve figure: accepted / ambiguous / low score
     struct Example { int x, y; const char* label; };
     const Example kExamples[] = {
-        {872, 384, "accepted"},
-        {844, 237, "rejected: ambiguous"},
-        {739, 347, "rejected: low ZNCC"},
+        {913, 525, "accepted"},
+        {864, 532, "rejected: ambiguous"},
+        {827, 464, "rejected: low ZNCC"},
     };
 
-    // Rows shown in the match figure (both images): y 0..469, full width
-    const int kMatchRows = 470;
+    // Rows shown in the match figure (both images): the rows of kCrop, full width
+    const int kMatchY0 = kCrop.y, kMatchRows = kCrop.height;
 
     // Colour scale of the match lines (disparity in px)
     const double kDispLo = 150.0, kDispHi = 400.0;
@@ -315,7 +333,7 @@ namespace {
         return c.at<cv::Vec3b>(0, 0);
     }
 
-    // Left | right (cropped to kMatchRows), one line per match coloured by disparity
+    // Left | right (rows of kCrop), one line per match coloured by disparity
     cv::Mat drawMatchFigure(const cv::Mat& left, const cv::Mat& right, const std::vector<StereoMatch>& ms) {
         cv::Mat both;
         cv::hconcat(left, right, both);
@@ -330,7 +348,23 @@ namespace {
                 cv::circle(img, p, 5, {0, 0, 0}, cv::FILLED, cv::LINE_AA);
                 cv::circle(img, p, 4, {0, 255, 0}, cv::FILLED, cv::LINE_AA);
             }
-        return img(cv::Rect(0, 0, img.cols, kMatchRows)).clone();
+        return img(cv::Rect(0, kMatchY0, img.cols, kMatchRows)).clone();
+    }
+
+    // Same drawing as drawMatches() in project_pose_estimation.cpp (full images, JET over dMin..dMax)
+    cv::Mat drawMatchesMain(const cv::Mat& left, const cv::Mat& right, const std::vector<StereoMatch>& ms,
+                            const StereoParams& p) {
+        cv::Mat both;
+        cv::hconcat(left, right, both);
+        cv::Mat bgr = toBgr(both);
+        for (const StereoMatch& m : ms) {
+            const cv::Vec3b c = jet((m.disparity - p.dMin) / double(p.dMax - p.dMin));
+            const cv::Point pl(m.xL, m.y), pr(static_cast<int>(std::lround(m.xR)) + left.cols, m.y);
+            cv::line(bgr, pl, pr, cv::Scalar(c[0], c[1], c[2]), 1, cv::LINE_AA);
+            cv::circle(bgr, pl, 3, {0, 255, 0}, -1, cv::LINE_AA);
+            cv::circle(bgr, pr, 3, {0, 255, 0}, -1, cv::LINE_AA);
+        }
+        return bgr;
     }
 
     // Horizontal colour bar for the disparity scale, with labels
@@ -406,15 +440,15 @@ namespace {
 }  // namespace
 
 int writeStereoCorrespondenceReport(const std::string& dataDir, const std::string& outDir) {
-    const cv::Mat left = loadGray(dataDir + "/left_001.png");
-    const cv::Mat right = loadGray(dataDir + "/right_001.png");
+    const cv::Mat left = loadGray(dataDir + "/" + kLeftFile);
+    const cv::Mat right = loadGray(dataDir + "/" + kRightFile);
     if (left.empty() || right.empty()) {
         std::cerr << "writeStereoCorrespondenceReport: cannot read images in " << dataDir << "\n";
         return 1;
     }
     std::filesystem::create_directories(outDir);
 
-    const Config cfg{};
+    Config cfg{};   // non-const: dbScan takes CameraParams&
     const StereoParams& sp = cfg.stereo;
     const int border = sp.half + 1;
 
@@ -428,6 +462,7 @@ int writeStereoCorrespondenceReport(const std::string& dataDir, const std::strin
     cv::Mat matchFig;
     cv::vconcat(matchImg, disparityBar(matchImg.cols), matchFig);
     cv::imwrite(outDir + "/rubik_matches.png", matchFig);
+    cv::imwrite(outDir + "/step2_matches.png", drawMatchesMain(left, right, ms, sp));
 
     // ---- figure: ZNCC curves of the example corners
     std::vector<cv::Mat> plots;
@@ -455,7 +490,7 @@ int writeStereoCorrespondenceReport(const std::string& dataDir, const std::strin
     for (const StereoMatch& m : ms) best.push_back(m.zncc);
 
     std::ostringstream o;
-    o << "Stereo correspondence report values (left_001.png / right_001.png)\n"
+    o << "Stereo correspondence report values (" << kLeftFile << " / " << kRightFile << ")\n"
       << "Parameters: patch " << 2 * sp.half + 1 << "x" << 2 * sp.half + 1 << ", disparity " << sp.dMin << ".." << sp.dMax
       << " px, minZncc = " << sp.minZncc << ", minUnique = " << sp.minUnique << ", peakExclusion = " << sp.peakExclusion
       << " px, lrTol = " << sp.lrTol << " px\n\n"
@@ -473,18 +508,64 @@ int writeStereoCorrespondenceReport(const std::string& dataDir, const std::strin
       << ", min " << fmt(*std::min_element(best.begin(), best.end()), 3) << "\n\n"
       << "Example corners (ZNCC curve figure):\n" << ex.str();
 
-    // Rejections on the cube, by reason and by region (left face x <= 790, top face y <= 250)
-    int low = 0, lowLeft = 0, amb = 0, ambTop = 0;
+    // Rejections on the cube, by reason and by face. A rejected corner has no 3D point, so it gets
+    // the face of the nearest accepted corner that the plane fitting assigned to a face (<= 30 px).
+    std::vector<cv::Point> facePx;
+    std::vector<std::string> faceOf;
+    {
+        const std::vector<cv::Point3d> cube = dbScan(ms, cfg.camera, kDbEps, kDbMinPts);
+        const std::vector<Plane> faces = fitFaces(cube, cfg.planes);
+        for (const Plane& f : faces)
+            for (int i : f.indices) { facePx.push_back(project(cube[i], cfg.camera)); faceOf.push_back(faceName(f.normal)); }
+    }
+    auto faceAt = [&](int x, int y) -> std::string {
+        double best = 30.0 * 30.0; std::string name = "unknown";
+        for (size_t i = 0; i < facePx.size(); ++i) {
+            const double dx = facePx[i].x - x, dy = facePx[i].y - y;
+            if (dx * dx + dy * dy <= best) { best = dx * dx + dy * dy; name = faceOf[i]; }
+        }
+        return name;
+    };
+    std::map<std::string, int> lowBy, ambBy, lrBy, accBy;
+    int low = 0, amb = 0;
     for (const Corner& c : corners) {
         if (!onCubeLeft(c.x, c.y)) continue;
         const RowSearch f = searchRow(left, right, c.x, c.y, +1, sp);
         if (!f.valid) continue;
-        if (f.best < sp.minZncc) { ++low; if (c.x <= 790) ++lowLeft; }
-        else if (f.best - f.second < sp.minUnique) { ++amb; if (c.y <= 250) ++ambTop; }
+        bool accepted = false;
+        for (const StereoMatch& m : ms) if (m.xL == c.x && m.y == c.y) accepted = true;
+        if (f.best < sp.minZncc) { ++low; ++lowBy[faceAt(c.x, c.y)]; }
+        else if (f.best - f.second < sp.minUnique) { ++amb; ++ambBy[faceAt(c.x, c.y)]; }
+        else if (accepted) ++accBy[faceAt(c.x, c.y)];
+        else ++lrBy[faceAt(c.x, c.y)];
     }
-    o << "\nRejected corners on the cube:\n"
-      << "  low ZNCC:  " << low << ", of which x <= 790 px (left face): " << lowLeft << "\n"
-      << "  ambiguous: " << amb << ", of which y <= 250 px (top face):  " << ambTop << "\n";
+    auto list = [](const std::map<std::string, int>& m) {
+        std::ostringstream t;
+        for (const auto& [k, v] : m) t << " " << k << " " << v << ";";
+        return t.str();
+    };
+    o << "\nRejected corners on the cube, by face (face of the nearest assigned point within 30 px):\n"
+      << "  low ZNCC:  " << low << " ->" << list(lowBy) << "\n"
+      << "  ambiguous: " << amb << " ->" << list(ambBy) << "\n"
+      << "  left-right check failed ->" << list(lrBy) << "\n"
+      << "  accepted (on cube box) ->" << list(accBy) << "\n"
+      << "Faces of the example corners:";
+    for (const Example& e : kExamples) o << " (" << e.x << ", " << e.y << ") " << faceAt(e.x, e.y) << ";";
+    o << "\n";
+    {   // accepted matches that DBSCAN removes later, and the disparity range of the kept cube points
+        const std::vector<cv::Point3d> cube = dbScan(ms, cfg.camera, kDbEps, kDbMinPts);
+        double lo = 1e18, hi = -1e18;
+        o << "Accepted matches removed later by DBSCAN:\n";
+        for (const StereoMatch& m : ms) {
+            const cv::Point3d P = triangulate(m, cfg.camera);
+            bool kept = false;
+            for (const cv::Point3d& Q : cube) if (cv::norm(P - Q) < 1e-9) kept = true;
+            if (kept) { lo = std::min(lo, m.disparity); hi = std::max(hi, m.disparity); }
+            else o << "  (" << m.xL << ", " << m.y << ") d = " << fmt(m.disparity, 4) << " px"
+                   << (onCubeLeft(m.xL, m.y) ? "  [inside the cube box: mismatch]" : "  [off the cube]") << "\n";
+        }
+        o << "Disparity of the matches kept as cube points: " << fmt(lo, 4) << " .. " << fmt(hi, 4) << " px\n";
+    }
 
     // Ambiguous rejections whose competing value lies on the flank of the best peak itself
     int flank = 0;
@@ -520,9 +601,6 @@ int writeStereoCorrespondenceReport(const std::string& dataDir, const std::strin
 // ======================================================================= Step 3
 namespace {
 
-    // DBSCAN parameters used in main()
-    const double kDbEps = 25.0;   // mm
-    const int kDbMinPts = 4;
 
     // Depth colour scale for the 3D figure (mm): near = red, far = blue (JET reversed)
     cv::Scalar depthColour(double z, double zNear, double zFar) {
@@ -564,8 +642,8 @@ namespace {
 }  // namespace
 
 int writeTriangulationReport(const std::string& dataDir, const std::string& outDir) {
-    const cv::Mat left = loadGray(dataDir + "/left_001.png");
-    const cv::Mat right = loadGray(dataDir + "/right_001.png");
+    const cv::Mat left = loadGray(dataDir + "/" + kLeftFile);
+    const cv::Mat right = loadGray(dataDir + "/" + kRightFile);
     if (left.empty() || right.empty()) {
         std::cerr << "writeTriangulationReport: cannot read images in " << dataDir << "\n";
         return 1;
@@ -619,20 +697,25 @@ int writeTriangulationReport(const std::string& dataDir, const std::string& outD
     const double cubeEdge = 57.0;
 
     std::ostringstream o;
-    o << "Triangulation report values (left_001.png / right_001.png)\n"
+    o << "Triangulation report values (" << kLeftFile << " / " << kRightFile << ")\n"
       << "Camera (Config.hpp): fx = " << cam.fx << " px, fy = " << cam.fy << " px, cx = " << cam.cx
       << " px, cy = " << cam.cy << " px, baseline = " << cam.baseline << " mm\n"
       << "DBSCAN: eps = " << kDbEps << " mm, minPts = " << kDbMinPts << "\n\n"
       << "Triangulated points: " << pts.size() << "\n"
       << "  kept by DBSCAN (cube): " << cube.size() << ", Z = " << fmt(zc0, 4) << " .. " << fmt(zc1, 4) << " mm\n"
-      << "  removed (wall):        " << nRemoved << ", Z = " << fmt(zw0, 4) << " .. " << fmt(zw1, 4) << " mm\n"
+      << "  removed by DBSCAN:     " << nRemoved << ", Z = " << fmt(zw0, 4) << " .. " << fmt(zw1, 4) << " mm\n"
       << "Largest distance between two cube points: " << fmt(extent, 3) << " mm"
       << " (cube " << cubeEdge << " mm: face diagonal " << fmt(cubeEdge * std::sqrt(2.0), 3)
       << " mm, space diagonal " << fmt(cubeEdge * std::sqrt(3.0), 3) << " mm)\n"
       << "Depth change per 1 px of disparity, Z^2 / (f B):\n"
       << "  nearest cube point (Z = " << fmt(zc0, 4) << " mm): " << fmt(dzPerPx(zc0), 2) << " mm\n"
       << "  farthest cube point (Z = " << fmt(zc1, 4) << " mm): " << fmt(dzPerPx(zc1), 2) << " mm\n"
-      << "  wall (Z = " << fmt(zw1, 4) << " mm): " << fmt(dzPerPx(zw1), 2) << " mm\n";
+      << "  farthest removed point (Z = " << fmt(zw1, 4) << " mm): " << fmt(dzPerPx(zw1), 2) << " mm\n";
+    o << "Removed points:\n";
+    for (size_t i = 0; i < ms.size(); ++i)
+        if (!inCube(pts[i]))
+            o << "  (" << ms[i].xL << ", " << ms[i].y << ") Z = " << fmt(pts[i].z, 4) << " mm"
+              << (onCubeLeft(ms[i].xL, ms[i].y) ? "  [inside the cube box]" : "  [off the cube]") << "\n";
 
     std::cout << o.str();
     std::ofstream(outDir + "/triangulation_values.txt") << o.str();
@@ -662,8 +745,8 @@ namespace {
 }  // namespace
 
 int writePlaneFittingReport(const std::string& dataDir, const std::string& outDir) {
-    const cv::Mat left = loadGray(dataDir + "/left_001.png");
-    const cv::Mat right = loadGray(dataDir + "/right_001.png");
+    const cv::Mat left = loadGray(dataDir + "/" + kLeftFile);
+    const cv::Mat right = loadGray(dataDir + "/" + kRightFile);
     if (left.empty() || right.empty()) {
         std::cerr << "writePlaneFittingReport: cannot read images in " << dataDir << "\n";
         return 1;
@@ -702,7 +785,7 @@ int writePlaneFittingReport(const std::string& dataDir, const std::string& outDi
     // ---- values
     std::ostringstream o;
     o << std::fixed;
-    o << "Plane fitting report values (left_001.png / right_001.png)\n"
+    o << "Plane fitting report values (" << kLeftFile << " / " << kRightFile << ")\n"
       << "Camera (Config.hpp): fx = " << std::setprecision(2) << cam.fx << " px, cx = " << cam.cx << " px, cy = "
       << cam.cy << " px, baseline = " << cam.baseline << " mm\n"
       << "RANSAC: threshold = " << std::setprecision(1) << pp.threshold << " mm, iterations = " << pp.iterations
@@ -717,7 +800,7 @@ int writePlaneFittingReport(const std::string& dataDir, const std::string& outDi
         double maxDist = 0.0;
         for (int i : pl.indices) maxDist = std::max(maxDist, std::abs(pointPlaneDistance(cube[i], pl)));
         nAssigned += static_cast<int>(pl.indices.size());
-        o << "  face " << f + 1 << " (" << (f < 3 ? kFaceNames[f] : "-") << "): " << pl.indices.size() << " points, RMS "
+        o << "  face " << f + 1 << " (" << (f < 3 ? kFaceNames[f] : "-") << ", " << faceName(pl.normal) << "): " << pl.indices.size() << " points, RMS "
           << std::setprecision(2) << pl.rms << " mm, max distance " << maxDist << " mm\n"
           << "    normal (" << std::setprecision(3) << pl.normal.x << ", " << pl.normal.y << ", " << pl.normal.z
           << "), centroid (" << std::setprecision(1) << pl.centroid.x << ", " << pl.centroid.y << ", "

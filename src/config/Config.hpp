@@ -27,7 +27,7 @@ namespace pe {
     // Step 3 - camera (ASSUMED values: read the real ones from the RealSense)
     struct CameraParams {
         double fx = 650.47, fy = 650.47;   // focal length (px)
-        double cx = 655.07, cy = 361.28;   // principal point (px)
+        double cx = 655.07, cy = 401.28;   // principal point (px), 1280x800
         double baseline = 95.05;          // mm
     };
 
