@@ -10,6 +10,7 @@ namespace pe {
         double quality = 0.01;   // keep scores above quality * max score
         int minDist = 6;         // min distance between corners (px)
         int maxCorners = 600;
+        double harrisK = 0.05;   // Harris only: k in R = det(M) - k * tr(M)^2
     };
 
     // Step 2 - stereo matching along epipolar lines
@@ -25,15 +26,24 @@ namespace pe {
 
     // Step 3 - camera (ASSUMED values: read the real ones from the RealSense)
     struct CameraParams {
-        double fx = 640.0, fy = 640.0;   // focal length (px)
-        double cx = 640.0, cy = 360.0;   // principal point (px)
-        double baseline = 95.0;          // mm
+        double fx = 650.47, fy = 650.47;   // focal length (px)
+        double cx = 655.07, cy = 361.28;   // principal point (px)
+        double baseline = 95.05;          // mm
+    };
+
+    struct PlaneParams {
+        double threshold = 2.5; // mm
+        double perpendicularityLimit = 0.35;  
+        int iterations = 500;
+        int minInIiers = 4;
+        int maxFaces = 3;
     };
 
     struct Config {
         CornerParams corners;
         StereoParams stereo;
         CameraParams camera;
+        PlaneParams planes;
     };
 
 }  // namespace pe

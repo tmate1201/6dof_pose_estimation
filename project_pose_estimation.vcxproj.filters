@@ -42,6 +42,12 @@
     <ClCompile Include="src\features\ShiTomasi.cpp">
       <Filter>Source Files\features</Filter>
     </ClCompile>
+    <ClCompile Include="src\features\Harris.cpp">
+      <Filter>Source Files\features</Filter>
+    </ClCompile>
+    <ClCompile Include="src\report\ReportFigures.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\stereo\StereoMatcher.cpp">
       <Filter>Source Files\stereo</Filter>
     </ClCompile>
@@ -49,6 +55,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Object_isolation.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlaneFit.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlaneFitTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -65,6 +77,12 @@
     <ClInclude Include="src\features\ShiTomasi.hpp">
       <Filter>Header Files\features</Filter>
     </ClInclude>
+    <ClInclude Include="src\features\Harris.hpp">
+      <Filter>Header Files\features</Filter>
+    </ClInclude>
+    <ClInclude Include="src\report\ReportFigures.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="src\stereo\StereoMatcher.hpp">
       <Filter>Header Files\stereo</Filter>
     </ClInclude>
@@ -72,6 +90,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Object_isolation.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PlaneFit.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PlaneFitTest.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

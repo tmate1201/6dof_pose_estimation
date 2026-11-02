@@ -36,17 +36,6 @@ results/       created at run time
   struct in `Config.hpp`, one output type in `Types.hpp`, one block in `main`.
 - Everything is in `namespace pe`.
 
-
-## Next steps (where they go)
-
-| Step | Module | Output type |
-|---|---|---|
-| 3 Triangulation | `src/reconstruction/Triangulation` (uses `CameraParams`) | `cv::Point3d` per match |
-| 4 Cube segmentation | `src/reconstruction/Clustering` | indices of cube points |
-| 5 Face planes (RANSAC + SVD) | `src/geometry/PlaneFit` | `Plane { normal, centroid, rms }` |
-| 6 Pose from normals | `src/geometry/Pose` | `Pose { R, t }` |
-| 7 Reprojection check | drawing in `main` | image |
-
 ## Running
 
 Results are saved to `/results`.
