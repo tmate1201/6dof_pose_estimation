@@ -1,14 +1,15 @@
 #pragma once
 // Report material for the "Feature Detection" and "Stereo Correspondence" subsections
-// and the "Triangulation" subsection (Rubik's cube test).
+// "Triangulation" and "Plane Fitting" subsections (Rubik's cube test).
 // Regenerates every figure and every number quoted there, using the pipeline's own
-// Step 1-3 code (ShiTomasi, Harris, StereoMatcher, Triangulation, dbScan). OpenCV is only used to load, draw and save.
+// Step 1-4 code (ShiTomasi, Harris, StereoMatcher, Triangulation, dbScan, fitFaces). OpenCV is only used to load, draw and save.
 //
 // Call it once, e.g. at the start of main():
 //     #include "src/report/ReportFigures.hpp"
 //     pe::report::writeFeatureDetectionReport("data", "results/report");
 //     pe::report::writeStereoCorrespondenceReport("data", "results/report");
 //     pe::report::writeTriangulationReport("data", "results/report");
+//     pe::report::writePlaneFittingReport("data", "results/report");
 
 #include <string>
 
@@ -33,5 +34,10 @@ namespace pe::report {
     //                              right: top view X-Z of the cube cluster)
     //   triangulation_values.txt  (all numbers of the section; also printed to the console)
     int writeTriangulationReport(const std::string& dataDir, const std::string& outDir);
+
+    // Same for the "Plane Fitting" subsection. Writes to <outDir>:
+    //   rubik_planes.png          (points on the left image coloured by face, with the face normals)
+    //   planes_values.txt         (all numbers of the section; also printed to the console)
+    int writePlaneFittingReport(const std::string& dataDir, const std::string& outDir);
 
 }  // namespace pe::report

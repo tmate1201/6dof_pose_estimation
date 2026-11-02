@@ -72,7 +72,7 @@ namespace pe {
 		int max_inliers = 0;
 
 		std::random_device rd;
-		std::mt19937 gen(42); //
+		std::mt19937 gen(rd()); //
 		std::uniform_int_distribution<> dis(0, candidateIndices.size() - 1);
 
 		for (int i = 0; i < params.iterations; i++) {

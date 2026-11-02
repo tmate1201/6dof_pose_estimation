@@ -19,6 +19,7 @@
 #include "../stereo/StereoMatcher.hpp"
 #include "../reconstruction/Triangulation.hpp"
 #include "../../Object_isolation.hpp"   // dbScan
+#include "../../PlaneFit.hpp"           // fitFaces
 
 namespace pe::report {
 namespace {
@@ -619,7 +620,7 @@ int writeTriangulationReport(const std::string& dataDir, const std::string& outD
 
     std::ostringstream o;
     o << "Triangulation report values (left_001.png / right_001.png)\n"
-      << "Camera (ASSUMED, Config.hpp): fx = " << cam.fx << " px, fy = " << cam.fy << " px, cx = " << cam.cx
+      << "Camera (Config.hpp): fx = " << cam.fx << " px, fy = " << cam.fy << " px, cx = " << cam.cx
       << " px, cy = " << cam.cy << " px, baseline = " << cam.baseline << " mm\n"
       << "DBSCAN: eps = " << kDbEps << " mm, minPts = " << kDbMinPts << "\n\n"
       << "Triangulated points: " << pts.size() << "\n"
@@ -636,6 +637,127 @@ int writeTriangulationReport(const std::string& dataDir, const std::string& outD
     std::cout << o.str();
     std::ofstream(outDir + "/triangulation_values.txt") << o.str();
     std::cout << "Triangulation report figures written to " << outDir << "/\n";
+    return 0;
+}
+
+
+// ======================================================================= Step 4
+namespace {
+
+    const cv::Scalar kFaceColours[] = {{230, 120, 30}, {40, 170, 40}, {40, 40, 220}};   // BGR: blue, green, red
+    const char* kFaceNames[] = {"blue", "green", "red"};
+
+    double angleDeg(const cv::Point3d& a, const cv::Point3d& b) {
+        return std::acos(std::clamp(a.dot(b), -1.0, 1.0)) * 180.0 / CV_PI;
+    }
+
+    // Arrow along the normal, drawn from the projected centroid
+    void drawNormal(cv::Mat& img, const Plane& f, const CameraParams& cam, double lengthMm, const cv::Scalar& colour) {
+        const cv::Point2d a = project(f.centroid, cam);
+        const cv::Point2d b = project(f.centroid + lengthMm * f.normal, cam);
+        cv::arrowedLine(img, a, b, {0, 0, 0}, 5, cv::LINE_AA, 0, 0.2);
+        cv::arrowedLine(img, a, b, colour, 3, cv::LINE_AA, 0, 0.2);
+    }
+
+}  // namespace
+
+int writePlaneFittingReport(const std::string& dataDir, const std::string& outDir) {
+    const cv::Mat left = loadGray(dataDir + "/left_001.png");
+    const cv::Mat right = loadGray(dataDir + "/right_001.png");
+    if (left.empty() || right.empty()) {
+        std::cerr << "writePlaneFittingReport: cannot read images in " << dataDir << "\n";
+        return 1;
+    }
+    std::filesystem::create_directories(outDir);
+
+    Config cfg{};
+    const CameraParams& cam = cfg.camera;
+    const PlaneParams& pp = cfg.planes;
+
+    // ---- Steps 1-4 as in main()
+    const std::vector<Corner> corners = detectCorners(left, cfg.corners, cfg.stereo.half + 1);
+    const std::vector<StereoMatch> ms = matchCorners(left, right, corners, cfg.stereo);
+    const std::vector<cv::Point3d> cube = dbScan(ms, cfg.camera, kDbEps, kDbMinPts);
+    const std::vector<Plane> faces = fitFaces(cube, pp);
+
+    // ---- figure: cube points coloured by face + normals
+    cv::Mat img = toBgr(left);
+    std::vector<bool> assigned(cube.size(), false);
+    for (size_t f = 0; f < faces.size() && f < 3; ++f)
+        for (int i : faces[f].indices) {
+            assigned[i] = true;
+            const cv::Point p = project(cube[i], cam);
+            cv::circle(img, p, 6, {0, 0, 0}, cv::FILLED, cv::LINE_AA);
+            cv::circle(img, p, 5, kFaceColours[f], cv::FILLED, cv::LINE_AA);
+        }
+    for (size_t i = 0; i < cube.size(); ++i)
+        if (!assigned[i]) {   // not on any face: white ring
+            const cv::Point p = project(cube[i], cam);
+            cv::circle(img, p, 6, {0, 0, 0}, 3, cv::LINE_AA);
+            cv::circle(img, p, 6, {255, 255, 255}, 1, cv::LINE_AA);
+        }
+    for (size_t f = 0; f < faces.size() && f < 3; ++f) drawNormal(img, faces[f], cam, 30.0, kFaceColours[f]);
+    cv::imwrite(outDir + "/rubik_planes.png", img(kCrop).clone());
+
+    // ---- values
+    std::ostringstream o;
+    o << std::fixed;
+    o << "Plane fitting report values (left_001.png / right_001.png)\n"
+      << "Camera (Config.hpp): fx = " << std::setprecision(2) << cam.fx << " px, cx = " << cam.cx << " px, cy = "
+      << cam.cy << " px, baseline = " << cam.baseline << " mm\n"
+      << "RANSAC: threshold = " << std::setprecision(1) << pp.threshold << " mm, iterations = " << pp.iterations
+      << ", perpendicularity limit |n_i . n_j| <= " << std::setprecision(2) << pp.perpendicularityLimit
+      << " (angle " << std::setprecision(1) << std::acos(pp.perpendicularityLimit) * 180.0 / CV_PI << " .. "
+      << 180.0 - std::acos(pp.perpendicularityLimit) * 180.0 / CV_PI << " deg), min inliers = " << pp.minInIiers
+      << ", max faces = " << pp.maxFaces << "\n\n"
+      << "Cube points: " << cube.size() << ", faces found: " << faces.size() << "\n";
+    int nAssigned = 0;
+    for (size_t f = 0; f < faces.size(); ++f) {
+        const Plane& pl = faces[f];
+        double maxDist = 0.0;
+        for (int i : pl.indices) maxDist = std::max(maxDist, std::abs(pointPlaneDistance(cube[i], pl)));
+        nAssigned += static_cast<int>(pl.indices.size());
+        o << "  face " << f + 1 << " (" << (f < 3 ? kFaceNames[f] : "-") << "): " << pl.indices.size() << " points, RMS "
+          << std::setprecision(2) << pl.rms << " mm, max distance " << maxDist << " mm\n"
+          << "    normal (" << std::setprecision(3) << pl.normal.x << ", " << pl.normal.y << ", " << pl.normal.z
+          << "), centroid (" << std::setprecision(1) << pl.centroid.x << ", " << pl.centroid.y << ", "
+          << pl.centroid.z << ") mm\n";
+    }
+    o << "  points not on any face: " << static_cast<int>(cube.size()) - nAssigned << "\n"
+      << "Angles between the normals:\n";
+    for (size_t i = 0; i < faces.size(); ++i)
+        for (size_t j = i + 1; j < faces.size(); ++j)
+            o << "  face " << i + 1 << " - face " << j + 1 << ": " << std::setprecision(1)
+              << angleDeg(faces[i].normal, faces[j].normal) << " deg\n";
+
+    // ---- sensitivity: focal length and RANSAC settings
+    auto anglesFor = [&](const CameraParams& c, const PlaneParams& p) {
+        const std::vector<Plane> fs = fitFaces(dbScan(ms, const_cast<CameraParams&>(c), kDbEps, kDbMinPts), p);
+        std::ostringstream a;
+        a << std::fixed << std::setprecision(1) << fs.size() << " faces, points";
+        for (const Plane& f : fs) a << " " << f.indices.size();
+        a << ", angles";
+        for (size_t i = 0; i < fs.size(); ++i)
+            for (size_t j = i + 1; j < fs.size(); ++j) a << " " << angleDeg(fs[i].normal, fs[j].normal);
+        return a.str();
+    };
+    o << "\nSensitivity to the focal length (all else unchanged):\n";
+    for (double f : {600.0, 640.0, cam.fx, 700.0}) {
+        CameraParams c = cam;
+        c.fx = c.fy = f;
+        o << "  f = " << std::setprecision(2) << f << " px: " << anglesFor(c, pp) << "\n";
+    }
+    o << "Sensitivity to the RANSAC settings:\n";
+    for (const auto& [tau, iters] : std::vector<std::pair<double, int>>{{pp.threshold, pp.iterations}, {1.5, 2000}}) {
+        PlaneParams q = pp;
+        q.threshold = tau;
+        q.iterations = iters;
+        o << "  threshold " << std::setprecision(1) << tau << " mm, " << iters << " iterations: " << anglesFor(cam, q) << "\n";
+    }
+
+    std::cout << o.str();
+    std::ofstream(outDir + "/planes_values.txt") << o.str();
+    std::cout << "Plane fitting report figures written to " << outDir << "/\n";
     return 0;
 }
 

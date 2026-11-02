@@ -159,7 +159,7 @@ namespace {
 
 int main(int argc, char** argv) {
     try {
-        return pe::report::writeTriangulationReport("data", "results/report");
+        return pe::report::writePlaneFittingReport("data", "results/report");
         std::vector<std::string> args(argv + 1, argv + argc);
         const bool show = std::find(args.begin(), args.end(), "--no-show") == args.end();
         args.erase(std::remove(args.begin(), args.end(), "--no-show"), args.end());
