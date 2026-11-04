@@ -1,6 +1,6 @@
 #pragma once
 // Report material for the "Feature Detection" and "Stereo Correspondence" subsections
-// "Triangulation" and "Plane Fitting" subsections (Rubik's cube test).
+// "Triangulation", "Plane Fitting" and "Pose Estimation" subsections (Rubik's cube test).
 // Regenerates every figure and every number quoted there, using the pipeline's own
 // Step 1-4 code (ShiTomasi, Harris, StereoMatcher, Triangulation, dbScan, fitFaces). OpenCV is only used to load, draw and save.
 //
@@ -10,6 +10,7 @@
 //     pe::report::writeStereoCorrespondenceReport("data", "results/report");
 //     pe::report::writeTriangulationReport("data", "results/report");
 //     pe::report::writePlaneFittingReport("data", "results/report");
+//     pe::report::writePoseEstimationReport("data", "results/report");
 
 #include <string>
 
@@ -39,5 +40,10 @@ namespace pe::report {
     //   rubik_planes.png          (points on the left image coloured by face, with the face normals)
     //   planes_values.txt         (all numbers of the section; also printed to the console)
     int writePlaneFittingReport(const std::string& dataDir, const std::string& outDir);
+
+    // Same for the "Pose Estimation" subsection. Writes to <outDir>:
+    //   rubik_pose.png            (left: faces after plane fitting, right: fitted cube after pose estimation)
+    //   pose_values.txt           (all numbers of the section; also printed to the console)
+    int writePoseEstimationReport(const std::string& dataDir, const std::string& outDir);
 
 }  // namespace pe::report

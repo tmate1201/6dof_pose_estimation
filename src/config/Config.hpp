@@ -39,11 +39,23 @@ namespace pe {
         int maxFaces = 3;
     };
 
+    // Step 6 - cube pose from the faces
+    struct PoseParams {
+        double edge = 57.0;          // cube edge a (mm)
+        int lmIterations = 30;
+        double lambda0 = 1e-3;       // initial LM damping
+        double huber = 1.0;          // mm, Huber threshold of the residuals
+        double reassignTol = 2.5;    // mm, point-to-face tolerance for re-association
+        int reassignRounds = 3;
+        double inlierTol = 2.0;      // mm, residuals counted in the RMS
+    };
+
     struct Config {
         CornerParams corners;
         StereoParams stereo;
         CameraParams camera;
         PlaneParams planes;
+        PoseParams pose;
     };
 
 }  // namespace pe

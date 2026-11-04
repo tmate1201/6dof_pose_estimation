@@ -21,6 +21,7 @@
 #include "../reconstruction/Triangulation.hpp"
 #include "../../Object_isolation.hpp"   // dbScan
 #include "../../PlaneFit.hpp"           // fitFaces
+#include "../pose/CubePose.hpp"         // step 6
 
 namespace pe::report {
 namespace {
@@ -841,6 +842,201 @@ int writePlaneFittingReport(const std::string& dataDir, const std::string& outDi
     std::cout << o.str();
     std::ofstream(outDir + "/planes_values.txt") << o.str();
     std::cout << "Plane fitting report figures written to " << outDir << "/\n";
+    return 0;
+}
+
+
+// ======================================================================= Step 6
+namespace {
+
+    // Colour of a face by its name, so both panels use the same colour for the same face
+    cv::Scalar faceColour(const std::string& name) {
+        if (name == "top") return {40, 170, 40};         // green
+        if (name == "left side") return {40, 40, 220};   // red
+        return {230, 120, 30};                           // blue: right side
+    }
+
+    // Tight crop around the cube points (+ margin), upscaled for readability
+    struct Zoom {
+        cv::Rect roi;
+        double s;
+        cv::Point2d map(const cv::Point2d& p) const { return {(p.x - roi.x) * s, (p.y - roi.y) * s}; }
+        cv::Point pt(const cv::Point2d& p) const { const cv::Point2d q = map(p); return {cvRound(q.x), cvRound(q.y)}; }
+    };
+
+    Zoom zoomAround(const std::vector<cv::Point3d>& pts, const CameraParams& cam, const cv::Size& img, int margin, double s) {
+        double x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+        for (const cv::Point3d& P : pts) {
+            const cv::Point2d p = project(P, cam);
+            x0 = std::min(x0, p.x); y0 = std::min(y0, p.y); x1 = std::max(x1, p.x); y1 = std::max(y1, p.y);
+        }
+        cv::Rect r(cvRound(x0) - margin, cvRound(y0) - margin, cvRound(x1 - x0) + 2 * margin, cvRound(y1 - y0) + 2 * margin);
+        r &= cv::Rect(0, 0, img.width, img.height);
+        return {r, s};
+    }
+
+    cv::Mat zoomedBackground(const cv::Mat& gray, const Zoom& z) {
+        cv::Mat big;
+        cv::resize(toBgr(gray)(z.roi), big, cv::Size(), z.s, z.s, cv::INTER_CUBIC);
+        return big;
+    }
+
+    void dot(cv::Mat& img, const cv::Point& p, const cv::Scalar& c) {
+        cv::circle(img, p, 5, {0, 0, 0}, cv::FILLED, cv::LINE_AA);
+        cv::circle(img, p, 4, c, cv::FILLED, cv::LINE_AA);
+    }
+
+    void label(cv::Mat& img, const std::string& text) {
+        cv::putText(img, text, {8, 22}, cv::FONT_HERSHEY_COMPLEX, 0.6, {0, 0, 0}, 1, cv::LINE_AA);
+    }
+
+    double rmsOf(const std::vector<double>& r, const std::vector<int>& lab) {
+        double s = 0.0; int n = 0;
+        for (size_t i = 0; i < r.size(); ++i) if (lab[i] >= 0) { s += r[i] * r[i]; ++n; }
+        return n ? std::sqrt(s / n) : 0.0;
+    }
+
+    cv::Vec3d axis(const cv::Matx33d& A, int k) { return {A(0, k), A(1, k), A(2, k)}; }
+
+}  // namespace
+
+int writePoseEstimationReport(const std::string& dataDir, const std::string& outDir) {
+    const cv::Mat left = loadGray(dataDir + "/" + kLeftFile);
+    const cv::Mat right = loadGray(dataDir + "/" + kRightFile);
+    if (left.empty() || right.empty()) {
+        std::cerr << "writePoseEstimationReport: cannot read images in " << dataDir << "\n";
+        return 1;
+    }
+    std::filesystem::create_directories(outDir);
+
+    Config cfg{};
+    const CameraParams& cam = cfg.camera;
+    const PoseParams& pp = cfg.pose;
+
+    // ---- Steps 1-5 as in main()
+    const std::vector<Corner> corners = detectCorners(left, cfg.corners, cfg.stereo.half + 1);
+    const std::vector<StereoMatch> ms = matchCorners(left, right, corners, cfg.stereo);
+    const std::vector<cv::Point3d> cube = dbScan(ms, cfg.camera, kDbEps, kDbMinPts);
+    std::vector<Plane> faces = fitFaces(cube, cfg.planes);
+
+    // ---- Step 6, piece by piece for the "before" numbers, then the whole step
+    const std::vector<int> ransacLabels = faceLabels(cube, faces);       // also fixes the face order
+    const CubePose init = initialPose(cube, ransacLabels, faces, pp.edge);
+    std::vector<int> finalLabels;
+    const CubePose pose = estimatePose(cube, faces, pp, &finalLabels);
+    if (!init.valid || !pose.valid) {
+        std::cerr << "writePoseEstimationReport: fewer than 2 faces, no pose\n";
+        return 1;
+    }
+    const double rmsBefore = rmsOf(residuals(cube, ransacLabels, init, pp.edge), ransacLabels);
+    const int nFaces = static_cast<int>(faces.size());
+    std::vector<std::string> names;
+    for (const Plane& f : faces) names.push_back(faceName(f.normal));
+
+    // ---- figure, left panel: points by RANSAC face, plane normals from the face centroids
+    const Zoom z = zoomAround(cube, cam, left.size(), 30, 1.25);
+    cv::Mat before = zoomedBackground(left, z);
+    for (size_t i = 0; i < cube.size(); ++i)
+        if (ransacLabels[i] >= 0) dot(before, z.pt(project(cube[i], cam)), faceColour(names[ransacLabels[i]]));
+    for (int k = 0; k < nFaces; ++k) {
+        const cv::Point a = z.pt(project(faces[k].centroid, cam));
+        const cv::Point b = z.pt(project(faces[k].centroid + 18.0 * faces[k].normal, cam));
+        cv::arrowedLine(before, a, b, {0, 0, 0}, 5, cv::LINE_AA, 0, 0.2);
+        cv::arrowedLine(before, a, b, faceColour(names[k]), 3, cv::LINE_AA, 0, 0.2);
+    }
+    label(before, "After plane fitting");
+
+    // ---- figure, right panel: fitted cube (visible faces filled), re-associated points, cube axes
+    cv::Mat after = zoomedBackground(left, z);
+    const double h = pp.edge / 2.0;
+    auto corner = [&](double sx, double sy, double sz) {                // cube corner in the camera frame
+        const cv::Vec3d c = pose.t + h * (sx * axis(pose.A, 0) + sy * axis(pose.A, 1) + sz * axis(pose.A, 2));
+        return z.pt(project(cv::Point3d(c[0], c[1], c[2]), cam));
+    };
+    cv::Mat overlay = after.clone();
+    for (int k = 0; k < nFaces; ++k) {                                    // seen face k lies at +h along axis k
+        const int u = (k + 1) % 3, v = (k + 2) % 3;
+        std::vector<cv::Point> quad;
+        for (const auto& [su, sv] : std::vector<std::pair<double, double>>{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}}) {
+            double s3[3]; s3[k] = 1; s3[u] = su; s3[v] = sv;
+            quad.push_back(corner(s3[0], s3[1], s3[2]));
+        }
+        cv::fillConvexPoly(overlay, quad, faceColour(names[k]), cv::LINE_AA);
+    }
+    cv::addWeighted(overlay, 0.28, after, 0.72, 0.0, after);
+    for (int a = 0; a < 8; ++a)                                           // edges of the visible faces only
+        for (int b = a + 1; b < 8; ++b) {
+            const int diff = a ^ b;
+            if (diff != 1 && diff != 2 && diff != 4) continue;
+            auto sgn = [](int i, int bit) { return (i >> bit) & 1 ? 1.0 : -1.0; };
+            bool visible = false;                                         // both corners on a seen face (+h side)
+            for (int k = 0; k < nFaces; ++k)
+                if (sgn(a, k) > 0 && sgn(b, k) > 0) visible = true;
+            if (!visible) continue;
+            cv::line(after, corner(sgn(a, 0), sgn(a, 1), sgn(a, 2)), corner(sgn(b, 0), sgn(b, 1), sgn(b, 2)),
+                     {0, 220, 255}, 1, cv::LINE_AA);
+        }
+    for (size_t i = 0; i < cube.size(); ++i)
+        if (finalLabels[i] >= 0) dot(after, z.pt(project(cube[i], cam)), faceColour(names[finalLabels[i]]));
+    const cv::Point c0 = z.pt(project(cv::Point3d(pose.t[0], pose.t[1], pose.t[2]), cam));
+    for (int k = 0; k < nFaces; ++k) {                                    // axes from the centre to the faces
+        const cv::Vec3d e = pose.t + 0.9 * pp.edge * axis(pose.A, k);
+        const cv::Point c1 = z.pt(project(cv::Point3d(e[0], e[1], e[2]), cam));
+        cv::arrowedLine(after, c0, c1, {0, 0, 0}, 5, cv::LINE_AA, 0, 0.15);
+        cv::arrowedLine(after, c0, c1, faceColour(names[k]), 3, cv::LINE_AA, 0, 0.15);
+    }
+    cv::circle(after, c0, 4, {0, 0, 0}, cv::FILLED, cv::LINE_AA);
+    label(after, "After pose estimation");
+    cv::imwrite(outDir + "/rubik_pose.png", sideBySide(before, after, 10));
+
+    // ---- values
+    auto perFace = [&](const std::vector<int>& lab) {
+        std::ostringstream t;
+        for (int k = 0; k < nFaces; ++k) {
+            int n = 0;
+            for (int l : lab) if (l == k) ++n;
+            t << (k ? " / " : "") << names[k] << " " << n;
+        }
+        return t.str();
+    };
+    double minAng = 180, maxAng = 0;                                      // angles between the RANSAC normals
+    for (int a = 0; a < nFaces; ++a)
+        for (int b = a + 1; b < nFaces; ++b) {
+            const double ang = std::acos(std::clamp(faces[a].normal.dot(faces[b].normal), -1.0, 1.0)) * 180.0 / CV_PI;
+            minAng = std::min(minAng, ang); maxAng = std::max(maxAng, ang);
+        }
+    const cv::Matx33d dR = init.A.t() * pose.A;                           // rotation from initial to final pose
+    const double turned = std::acos(std::clamp((dR(0, 0) + dR(1, 1) + dR(2, 2) - 1.0) / 2.0, -1.0, 1.0)) * 180.0 / CV_PI;
+    const cv::Matx33d AtA = pose.A.t() * pose.A;
+    double orth = 0.0;
+    for (int i = 0; i < 3; ++i) for (int j = 0; j < 3; ++j) orth = std::max(orth, std::abs(AtA(i, j) - (i == j ? 1.0 : 0.0)));
+
+    std::ostringstream o;
+    o << std::fixed;
+    o << "Pose estimation report values (" << kLeftFile << " / " << kRightFile << ")\n"
+      << "Parameters: edge " << std::setprecision(1) << pp.edge << " mm, Huber " << pp.huber << " mm, LM iterations <= "
+      << pp.lmIterations << ", lambda0 " << std::setprecision(4) << pp.lambda0 << ", re-association tol " << std::setprecision(1)
+      << pp.reassignTol << " mm x " << pp.reassignRounds << " rounds, inlier tol " << pp.inlierTol << " mm\n\n"
+      << "Cube points: " << cube.size() << ", faces: " << nFaces << "\n"
+      << "After plane fitting (RANSAC labels, initial pose):\n"
+      << "  points per face: " << perFace(ransacLabels) << "\n"
+      << "  RMS point-face distance: " << std::setprecision(2) << rmsBefore << " mm\n"
+      << "  angles between the normals: " << std::setprecision(1) << minAng << " .. " << maxAng << " deg\n"
+      << "After pose estimation:\n"
+      << "  points per face: " << perFace(finalLabels) << "\n"
+      << "  RMS point-face distance: " << std::setprecision(2) << pose.rms << " mm, " << pose.inliers << "/" << pose.points
+      << " points within " << std::setprecision(1) << pp.inlierTol << " mm\n"
+      << "  centre T = (" << pose.t[0] << ", " << pose.t[1] << ", " << pose.t[2] << ") mm\n"
+      << "  change from the initial pose: centre " << std::setprecision(2) << cv::norm(pose.t - init.t) << " mm, axes "
+      << turned << " deg\n"
+      << "  |A^T A - I| max " << std::scientific << std::setprecision(1) << orth << std::fixed << "\n"
+      << "  R0 (columns = axes of the faces in the order above):\n";
+    for (int i = 0; i < 3; ++i)
+        o << "    " << std::setprecision(4) << pose.A(i, 0) << "  " << pose.A(i, 1) << "  " << pose.A(i, 2) << "\n";
+
+    std::cout << o.str();
+    std::ofstream(outDir + "/pose_values.txt") << o.str();
+    std::cout << "Pose estimation report figures written to " << outDir << "/\n";
     return 0;
 }
 

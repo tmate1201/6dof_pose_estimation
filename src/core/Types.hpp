@@ -38,4 +38,12 @@ namespace pe {
         bool valid = false;
     };
 
+    struct CubePose {
+        cv::Matx33d A;               // columns = cube axes (outward normals of the seen faces)
+        cv::Vec3d t;                 // cube centre (mm)
+        double rms = 0;              // RMS point-to-face distance of the inliers (mm)
+        int inliers = 0;
+        int points = 0;
+        bool valid = false;
+    };
 }  

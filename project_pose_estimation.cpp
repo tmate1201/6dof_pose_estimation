@@ -3,7 +3,7 @@
 // runs the steps in order and shows/saves the results with OpenCV.
 //
 // Usage:  project_pose_estimation.exe [left.png right.png] [--no-show]
-//         (default: data/cube_L.png data/cube_R.png, relative to the working directory)
+//         (default: data/left_015.png data/right_015.png, relative to the working directory)
 
 #include <algorithm>
 #include <chrono>
@@ -28,6 +28,7 @@
 #include "Object_isolation.hpp"
 #include "PlaneFit.hpp"
 #include "PlaneFitTest.hpp"
+#include "src/pose/CubePose.hpp"
 
 namespace {
 
@@ -163,12 +164,13 @@ int main(int argc, char** argv) {
         pe::report::writeStereoCorrespondenceReport("data", "results/report");
         pe::report::writeTriangulationReport("data", "results/report");
         pe::report::writePlaneFittingReport("data", "results/report");
+        pe::report::writePoseEstimationReport("data", "results/report");
 
         std::vector<std::string> args(argv + 1, argv + argc);
         const bool show = std::find(args.begin(), args.end(), "--no-show") == args.end();
         args.erase(std::remove(args.begin(), args.end(), "--no-show"), args.end());
-        const std::string leftPath = args.size() >= 2 ? args[0] : "data/left_001.png";
-        const std::string rightPath = args.size() >= 2 ? args[1] : "data/right_001.png";
+        const std::string leftPath = args.size() >= 2 ? args[0] : "data/left_015.png";
+        const std::string rightPath = args.size() >= 2 ? args[1] : "data/right_015.png";
         const std::string outDir = "results";
         std::filesystem::create_directories(outDir);
 
@@ -212,6 +214,23 @@ int main(int argc, char** argv) {
         std::cout << "FACES: " << faces.size() << std::endl;
 
         showFaces(left, faces, cluster, cfg.camera);
+
+        // ---- Step 6: cube pose (initial guess from the normals, LM on point-to-face distances) ----
+        std::vector<int> poseLabels;
+        const pe::CubePose pose = timed("Step 6 pose", [&] {
+            return pe::estimatePose(cluster, faces, cfg.pose, &poseLabels);
+        });
+        if (pose.valid) {
+            int perFace[3] = {0, 0, 0};
+            for (int l : poseLabels) if (l >= 0) ++perFace[l];
+            std::cout << "Step 6: centre t = (" << pose.t[0] << ", " << pose.t[1] << ", " << pose.t[2] << ") mm\n"
+                      << "  axes A (columns) =\n" << pose.A << "\n"
+                      << "  RMS " << pose.rms << " mm, " << pose.inliers << "/" << pose.points
+                      << " points within " << cfg.pose.inlierTol << " mm, points per face "
+                      << perFace[0] << "/" << perFace[1] << "/" << perFace[2] << "\n";
+        } else {
+            std::cout << "Step 6: fewer than 2 faces, no pose\n";
+        }
 
         std::cout << "Results written to " << outDir << "/\n";
         if (show) {
