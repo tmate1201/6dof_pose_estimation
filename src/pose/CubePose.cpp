@@ -232,6 +232,11 @@ namespace pe {
     void refineLM(const std::vector<cv::Point3d>& pts, const std::vector<int>& label, CubePose& pose, const PoseParams& p) {
         if (!pose.valid)
             return;
+        bool thirdFace = false;
+
+        for (int l : label)
+            if (l == 2) { thirdFace = true; break; }
+
         std::vector<double> r = residuals(pts, label, pose, p.edge);
         double lambda = p.lambda0;
 
@@ -267,6 +272,13 @@ namespace pe {
                 cv::Matx66d Hd = H;
                 for (int j = 0; j < 6; ++j) Hd(j, j) += lambda * (H(j, j) + 1e-9);   // H + lambda diag(H)
                 if (solve6(Hd, -g, dx)) {
+                    if (!thirdFace) {                                   // NEW: no step along the hidden axis
+                        const cv::Vec3d h = col(pose.A, 2);
+                        const double s = dx[3] * h[0] + dx[4] * h[1] + dx[5] * h[2];
+                        dx[3] -= s * h[0];
+                        dx[4] -= s * h[1];
+                        dx[5] -= s * h[2];
+                    }
                     CubePose cand = pose;
                     cand.A = rodrigues(cv::Vec3d(dx[0], dx[1], dx[2])) * pose.A;     // rotate the axes
                     cand.t = pose.t + cv::Vec3d(dx[3], dx[4], dx[5]);                // shift the centre
@@ -317,8 +329,8 @@ namespace pe {
     }
 
     // Step 6: labels -> initial pose -> LM -> (reassign -> LM) x reassignRounds -> quality
-    CubePose estimatePose(const std::vector<cv::Point3d>& pts, std::vector<Plane> faces, const PoseParams& p,
-                          std::vector<int>* labelsOut) {
+    CubePose estimatePose(const std::vector<cv::Point3d>& pts, std::vector<Plane> faces, const PoseParams& p, std::vector<int>* labelsOut) {
+
         std::vector<int> label = faceLabels(pts, faces);              // also fixes the face order
         CubePose pose = initialPose(pts, label, faces, p.edge);
         if (!pose.valid)

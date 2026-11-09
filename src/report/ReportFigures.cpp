@@ -28,8 +28,8 @@ namespace {
 
     // ---------------------------------------------------------------- settings
     // Image pair used for the report (in dataDir)
-    const std::string kLeftFile = "left_015.png";
-    const std::string kRightFile = "right_015.png";
+    const std::string kLeftFile = "left_027.png";
+    const std::string kRightFile = "right_027.png";
 
     // Crop used for all cropped figures (left image): x 420..1099, y 230..679
     const cv::Rect kCrop(420, 230, 680, 450);
@@ -42,7 +42,7 @@ namespace {
     const cv::Rect kWall(300, 100, 700, 240);
 
     // DBSCAN parameters used in main()
-    const double kDbEps = 25.0;   // mm
+    const double kDbEps = 35.0;   // mm
     const int kDbMinPts = 4;
 
     // Name of a visible cube face from its normal (left camera frame: X right, Y down, Z forward)
@@ -1038,6 +1038,251 @@ int writePoseEstimationReport(const std::string& dataDir, const std::string& out
     std::ofstream(outDir + "/pose_values.txt") << o.str();
     std::cout << "Pose estimation report figures written to " << outDir << "/\n";
     return 0;
+}
+
+}  // namespace pe::report
+
+
+// ============================================================ Pose sequence
+// Runs Steps 1-6 on left_NNN.png / right_NNN.png for NNN = first..last and reports the
+// relative rotation between consecutive poses (and from the first to the last pose).
+#include <cstdio>
+#include "../pose/FaceId.hpp"   // cubeRotations(): the 24 rotations of a cube onto itself
+
+namespace pe::report {
+namespace {
+
+    // Rotation angle of R in degrees: theta = acos((tr R - 1) / 2)
+    double rotationAngleDeg(const cv::Matx33d& R) {
+        const double c = (R(0, 0) + R(1, 1) + R(2, 2) - 1.0) / 2.0;
+        return std::acos(std::clamp(c, -1.0, 1.0)) * 180.0 / CV_PI;
+    }
+
+    // Unit rotation axis of R (from its skew-symmetric part); zero vector if R is ~identity
+    cv::Vec3d rotationAxis(const cv::Matx33d& R) {
+        const cv::Vec3d w(R(2, 1) - R(1, 2), R(0, 2) - R(2, 0), R(1, 0) - R(0, 1));
+        const double n = cv::norm(w);
+        return n > 1e-9 ? w / n : cv::Vec3d(0, 0, 0);
+    }
+
+    struct SequenceFrame {
+        int index = 0;
+        CubePose pose;
+        int nFaces = 0;
+        // kept for the figure, which is drawn once the face names are known
+        cv::Mat left;
+        std::vector<cv::Point3d> cube;
+        std::vector<Plane> faces;
+        std::vector<int> ransacLabels, finalLabels;
+        std::string header;                 // "[NNN] ... corners, ... faces"
+        std::vector<std::string> names;     // name of face k (= column k of A), same across the sequence
+    };
+
+    // Names the faces consistently over the whole sequence. faceName() decides per image from the
+    // sign of the normal's x component, so a face that turns through the viewing direction would
+    // change name (and colour) between images. Here each face is followed from image to image
+    // (the axis closest to it in the previous image, within 45 deg), and the whole track gets the
+    // name of its average axis.
+    void nameFacesAlongSequence(std::vector<SequenceFrame>& frames) {
+        const double minCos = std::cos(45.0 * CV_PI / 180.0);
+        std::vector<cv::Vec3d> trackSum;                         // summed axis of every track
+        std::vector<std::vector<int>> track(frames.size());     // track id of face k in frame i
+        for (size_t i = 0; i < frames.size(); ++i) {
+            for (int k = 0; k < frames[i].nFaces; ++k) {
+                const cv::Vec3d a = axis(frames[i].pose.A, k);
+                int id = -1;
+                double best = minCos;
+                if (i > 0)
+                    for (int j = 0; j < frames[i - 1].nFaces; ++j) {
+                        const double c = a.dot(axis(frames[i - 1].pose.A, j));
+                        if (c > best) { best = c; id = track[i - 1][j]; }
+                    }
+                if (id < 0) { id = static_cast<int>(trackSum.size()); trackSum.push_back({0, 0, 0}); }
+                track[i].push_back(id);
+                trackSum[id] += a;
+            }
+        }
+        for (size_t i = 0; i < frames.size(); ++i) {
+            frames[i].names.clear();
+            for (int id : track[i]) {
+                const cv::Vec3d m = trackSum[id] / cv::norm(trackSum[id]);
+                frames[i].names.push_back(faceName({m[0], m[1], m[2]}));
+            }
+        }
+    }
+
+    // Same figure as rubik_pose.png in writePoseEstimationReport (left: faces after plane fitting,
+    // right: fitted cube after pose estimation), for one image pair of the sequence.
+    cv::Mat drawPoseFigure(const cv::Mat& left, const std::vector<cv::Point3d>& cube, const std::vector<Plane>& faces,
+                           const std::vector<int>& ransacLabels, const std::vector<int>& finalLabels,
+                           const CubePose& pose, const CameraParams& cam, const PoseParams& pp, const std::string& title,
+                           const std::vector<std::string>& names) {
+        const int nFaces = static_cast<int>(faces.size());
+
+        // left panel: points by RANSAC face, plane normals from the face centroids
+        const Zoom z = zoomAround(cube, cam, left.size(), 30, 1.25);
+        cv::Mat before = zoomedBackground(left, z);
+        for (size_t i = 0; i < cube.size(); ++i)
+            if (ransacLabels[i] >= 0) dot(before, z.pt(project(cube[i], cam)), faceColour(names[ransacLabels[i]]));
+        for (int k = 0; k < nFaces; ++k) {
+            const cv::Point a = z.pt(project(faces[k].centroid, cam));
+            const cv::Point b = z.pt(project(faces[k].centroid + 18.0 * faces[k].normal, cam));
+            cv::arrowedLine(before, a, b, {0, 0, 0}, 5, cv::LINE_AA, 0, 0.2);
+            cv::arrowedLine(before, a, b, faceColour(names[k]), 3, cv::LINE_AA, 0, 0.2);
+        }
+        label(before, title + ": after plane fitting");
+
+        // right panel: fitted cube (visible faces filled), re-associated points, cube axes
+        cv::Mat after = zoomedBackground(left, z);
+        const double h = pp.edge / 2.0;
+        auto corner = [&](double sx, double sy, double sz) {
+            const cv::Vec3d c = pose.t + h * (sx * axis(pose.A, 0) + sy * axis(pose.A, 1) + sz * axis(pose.A, 2));
+            return z.pt(project(cv::Point3d(c[0], c[1], c[2]), cam));
+        };
+        cv::Mat overlay = after.clone();
+        for (int k = 0; k < nFaces; ++k) {
+            const int u = (k + 1) % 3, v = (k + 2) % 3;
+            std::vector<cv::Point> quad;
+            for (const auto& [su, sv] : std::vector<std::pair<double, double>>{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}}) {
+                double s3[3]; s3[k] = 1; s3[u] = su; s3[v] = sv;
+                quad.push_back(corner(s3[0], s3[1], s3[2]));
+            }
+            cv::fillConvexPoly(overlay, quad, faceColour(names[k]), cv::LINE_AA);
+        }
+        cv::addWeighted(overlay, 0.28, after, 0.72, 0.0, after);
+        for (int a = 0; a < 8; ++a)
+            for (int b = a + 1; b < 8; ++b) {
+                const int diff = a ^ b;
+                if (diff != 1 && diff != 2 && diff != 4) continue;
+                auto sgn = [](int i, int bit) { return (i >> bit) & 1 ? 1.0 : -1.0; };
+                bool visible = false;
+                for (int k = 0; k < nFaces; ++k)
+                    if (sgn(a, k) > 0 && sgn(b, k) > 0) visible = true;
+                if (!visible) continue;
+                cv::line(after, corner(sgn(a, 0), sgn(a, 1), sgn(a, 2)), corner(sgn(b, 0), sgn(b, 1), sgn(b, 2)),
+                         {0, 220, 255}, 1, cv::LINE_AA);
+            }
+        for (size_t i = 0; i < cube.size(); ++i)
+            if (finalLabels[i] >= 0) dot(after, z.pt(project(cube[i], cam)), faceColour(names[finalLabels[i]]));
+        const cv::Point c0 = z.pt(project(cv::Point3d(pose.t[0], pose.t[1], pose.t[2]), cam));
+        for (int k = 0; k < nFaces; ++k) {
+            const cv::Vec3d e = pose.t + 0.9 * pp.edge * axis(pose.A, k);
+            const cv::Point c1 = z.pt(project(cv::Point3d(e[0], e[1], e[2]), cam));
+            cv::arrowedLine(after, c0, c1, {0, 0, 0}, 5, cv::LINE_AA, 0, 0.15);
+            cv::arrowedLine(after, c0, c1, faceColour(names[k]), 3, cv::LINE_AA, 0, 0.15);
+        }
+        cv::circle(after, c0, 4, {0, 0, 0}, cv::FILLED, cv::LINE_AA);
+        label(after, title + ": after pose estimation");
+        return sideBySide(before, after, 10);
+    }
+
+}  // namespace
+
+int writePoseSequenceReport(const std::string& dataDir, const std::string& outDir, int first, int last) {
+    std::filesystem::create_directories(outDir);
+    Config cfg{};
+    const std::vector<cv::Matx33d> sym = cubeRotations();
+
+    std::ostringstream o;
+    o << std::fixed;
+    o << "Pose sequence report (images " << first << ".." << last << " in " << dataDir << ")\n"
+      << "Relative rotation between consecutive poses: dR = A_next * A_prev^T (camera frame),\n"
+      << "angle = acos((trace(dR) - 1) / 2). 'raw' uses the face order as estimated; 'min. over cube symmetry'\n"
+      << "takes the smallest angle over the 24 relabellings of the cube axes, in case the face order changed.\n\n";
+
+    // ---- Steps 1-6 for every image pair
+    std::vector<SequenceFrame> frames;
+    for (int k = first; k <= last; ++k) {
+        char num[8];
+        std::snprintf(num, sizeof(num), "%03d", k);
+        const std::string lf = "left_" + std::string(num) + ".png", rf = "right_" + std::string(num) + ".png";
+        const cv::Mat left = loadGray(dataDir + "/" + lf);
+        const cv::Mat right = loadGray(dataDir + "/" + rf);
+        if (left.empty() || right.empty()) {
+            o << "[" << num << "] cannot read " << lf << " / " << rf << ", skipped\n";
+            continue;
+        }
+
+        const std::vector<Corner> corners = detectCorners(left, cfg.corners, cfg.stereo.half + 1);
+        const std::vector<StereoMatch> ms = matchCorners(left, right, corners, cfg.stereo);
+        const std::vector<cv::Point3d> cube = dbScan(ms, cfg.camera, kDbEps, kDbMinPts);
+        std::vector<Plane> faces = fitFaces(cube, cfg.planes);
+
+        o << "[" << num << "] " << corners.size() << " corners, " << ms.size() << " matches, " << cube.size()
+          << " cube points, " << faces.size() << " faces";
+        if (faces.size() < 2) { o << " -> no pose (fewer than 2 faces), skipped\n"; continue; }
+
+        const std::vector<int> ransacLabels = faceLabels(cube, faces);   // also fixes the face order (as in the report)
+        std::vector<int> finalLabels;
+        const CubePose pose = estimatePose(cube, faces, cfg.pose, &finalLabels);
+        if (!pose.valid) { o << " -> no pose, skipped\n"; continue; }
+
+        std::ostringstream h;
+        h << std::fixed << "[" << num << "] " << corners.size() << " corners, " << ms.size() << " matches, "
+          << cube.size() << " cube points, " << faces.size() << " faces";
+        SequenceFrame f;
+        f.index = k; f.pose = pose; f.nFaces = static_cast<int>(faces.size());
+        f.left = left; f.cube = cube; f.faces = faces; f.ransacLabels = ransacLabels; f.finalLabels = finalLabels;
+        f.header = h.str();
+        frames.push_back(std::move(f));
+        o << " -> pose found\n";
+    }
+
+    // ---- consistent face names, then the figures and the per-image values
+    nameFacesAlongSequence(frames);
+    o << "\nPoses (face names are kept the same for a face across the sequence):\n";
+    for (const SequenceFrame& f : frames) {
+        char num[8];
+        std::snprintf(num, sizeof(num), "%03d", f.index);
+        const std::string figName = "rubik_pose_" + std::string(num) + ".png";
+        cv::imwrite(outDir + "/" + figName, drawPoseFigure(f.left, f.cube, f.faces, f.ransacLabels, f.finalLabels,
+                                                           f.pose, cfg.camera, cfg.pose, num, f.names));
+        const CubePose& pose = f.pose;
+        o << f.header << ", RMS " << std::setprecision(2) << pose.rms << " mm, " << pose.inliers << "/" << pose.points << " inliers\n"
+          << "      figure: " << figName << "\n"
+          << "      centre T = (" << std::setprecision(1) << pose.t[0] << ", " << pose.t[1] << ", " << pose.t[2] << ") mm\n"
+          << "      A (columns = cube axes: ";
+        for (int c = 0; c < 3; ++c)
+            o << (c < f.nFaces ? f.names[c] : std::string("cross product")) << (c < 2 ? ", " : "):\n");
+        for (int i = 0; i < 3; ++i)
+            o << "        " << std::setprecision(4) << std::setw(8) << pose.A(i, 0) << "  " << std::setw(8) << pose.A(i, 1)
+              << "  " << std::setw(8) << pose.A(i, 2) << "\n";
+    }
+
+    // ---- relative rotations
+    auto compare = [&](const SequenceFrame& a, const SequenceFrame& b) {
+        const cv::Matx33d dR = b.pose.A * a.pose.A.t();
+        const double raw = rotationAngleDeg(dR);
+        const cv::Vec3d ax = rotationAxis(dR);
+        double best = 1e9;
+        for (const cv::Matx33d& G : sym) best = std::min(best, rotationAngleDeg(b.pose.A * G * a.pose.A.t()));
+
+        char hdr[32];
+        std::snprintf(hdr, sizeof(hdr), "%03d -> %03d", a.index, b.index);
+        o << "  " << hdr << ": raw " << std::setprecision(2) << std::setw(7) << raw << " deg, min. over cube symmetry "
+          << std::setw(6) << best << " deg";
+        if (raw - best > 1.0) o << "  (face order changed)";
+        o << "\n      axis (camera frame) = (" << std::setprecision(3) << ax[0] << ", " << ax[1] << ", " << ax[2] << ")"
+          << ", per-axis angles = ";
+        for (int c = 0; c < 3; ++c) {
+            const double d = std::clamp(axis(a.pose.A, c).dot(axis(b.pose.A, c)), -1.0, 1.0);
+            o << std::setprecision(2) << std::acos(d) * 180.0 / CV_PI << (c < 2 ? " / " : " deg");
+        }
+        o << ", centre moved " << std::setprecision(1) << cv::norm(b.pose.t - a.pose.t) << " mm\n";
+    };
+
+    o << "\nRelative rotations between consecutive poses:\n";
+    if (frames.size() < 2) o << "  fewer than 2 valid poses, nothing to compare\n";
+    for (size_t i = 1; i < frames.size(); ++i) compare(frames[i - 1], frames[i]);
+    if (frames.size() > 2) {
+        o << "First to last:\n";
+        compare(frames.front(), frames.back());
+    }
+
+    std::cout << o.str();
+    std::ofstream(outDir + "/pose_sequence_values.txt") << o.str();
+    std::cout << "Pose sequence report written to " << outDir << "/\n";
+    return frames.size() >= 2 ? 0 : 1;
 }
 
 }  // namespace pe::report

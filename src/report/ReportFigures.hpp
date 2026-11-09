@@ -47,3 +47,14 @@ namespace pe::report {
     int writePoseEstimationReport(const std::string& dataDir, const std::string& outDir);
 
 }  // namespace pe::report
+
+namespace pe::report {
+
+    // Runs Steps 1-6 on <dataDir>/left_NNN.png + right_NNN.png for NNN = first..last
+    // (default 026..030) and reports the relative rotation between consecutive poses
+    // and from the first to the last. Writes <outDir>/pose_sequence_values.txt (also printed)
+    // and <outDir>/rubik_pose_NNN.png for every pair (same figure as rubik_pose.png).
+    // Returns 0 if at least two poses were found, 1 otherwise.
+    int writePoseSequenceReport(const std::string& dataDir, const std::string& outDir, int first = 26, int last = 30);
+
+}  // namespace pe::report

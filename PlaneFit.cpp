@@ -70,6 +70,7 @@ namespace pe {
 
 		Plane best_plane;
 		int max_inliers = 0;
+		double best_sse = std::numeric_limits<double>::max();
 
 		std::random_device rd;
 		std::mt19937 gen(rd()); //
@@ -97,14 +98,19 @@ namespace pe {
 
 			if (skip) continue;
 
+			double sse = 0.0;                                       // NEW
 			for (int k = 0; k < candidateIndices.size(); ++k) {
-				if (std::abs(pointPlaneDistance(points[candidateIndices[k]], plane)) < params.threshold) {
+				const double dist = pointPlaneDistance(points[candidateIndices[k]], plane);
+				if (std::abs(dist) < params.threshold) {
 					plane.indices.push_back(candidateIndices[k]);
+					sse += dist * dist;                             // NEW
 				}
 			}
 
-			if (plane.indices.size() > max_inliers) {
+			if (plane.indices.size() > max_inliers ||
+				(plane.indices.size() == max_inliers && sse < best_sse)) {
 				max_inliers = plane.indices.size();
+				best_sse = sse;
 				best_plane = plane;
 			}
 		}

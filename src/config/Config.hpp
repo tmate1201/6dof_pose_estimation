@@ -34,7 +34,7 @@ namespace pe {
     struct PlaneParams {
         double threshold = 2.5; // mm
         double perpendicularityLimit = 0.35;  
-        int iterations = 500;
+        int iterations = 2000;
         int minInIiers = 4;
         int maxFaces = 3;
     };
@@ -57,5 +57,14 @@ namespace pe {
         PlaneParams planes;
         PoseParams pose;
     };
+
+    struct FaceIdParams {
+        std::string modelPath = "data/rubik_model.json";
+        double minCos = 0.3;          // sticker visible if its normal faces the camera at least this much
+        double windowFrac = 0.2;      // sampling window radius as a fraction of a sticker (19 mm)
+        double shiftRange = 25.0;     // mm, only used if a cube axis has no visible face
+    };
+
+
 
 }  // namespace pe

@@ -46,4 +46,12 @@ namespace pe {
         int points = 0;
         bool valid = false;
     };
+
+    struct Orientation {
+        cv::Matx33d R;                // model -> camera
+        cv::Vec3d t;                  // centre (shifted only in the 2-face case)
+        double best = 0, second = 0;  // correlation scores
+        int visible = 0;              // stickers used
+        bool valid = false;
+    };
 }  

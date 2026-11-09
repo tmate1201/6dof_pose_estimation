@@ -160,85 +160,86 @@ namespace {
 
 int main(int argc, char** argv) {
     try {
-        pe::report::writeFeatureDetectionReport("data", "results/report");
-        pe::report::writeStereoCorrespondenceReport("data", "results/report");
-        pe::report::writeTriangulationReport("data", "results/report");
-        pe::report::writePlaneFittingReport("data", "results/report");
-        pe::report::writePoseEstimationReport("data", "results/report");
+        pe::report::writePoseSequenceReport("data", "results/report", 31, 35);
+        //pe::report::writeFeatureDetectionReport("data", "results/report");
+        //pe::report::writeStereoCorrespondenceReport("data", "results/report");
+        //pe::report::writeTriangulationReport("data", "results/report");
+        //pe::report::writePlaneFittingReport("data", "results/report");
+        //pe::report::writePoseEstimationReport("data", "results/report");
 
-        std::vector<std::string> args(argv + 1, argv + argc);
-        const bool show = std::find(args.begin(), args.end(), "--no-show") == args.end();
-        args.erase(std::remove(args.begin(), args.end(), "--no-show"), args.end());
-        const std::string leftPath = args.size() >= 2 ? args[0] : "data/left_015.png";
-        const std::string rightPath = args.size() >= 2 ? args[1] : "data/right_015.png";
-        const std::string outDir = "results";
-        std::filesystem::create_directories(outDir);
+        //std::vector<std::string> args(argv + 1, argv + argc);
+        //const bool show = std::find(args.begin(), args.end(), "--no-show") == args.end();
+        //args.erase(std::remove(args.begin(), args.end(), "--no-show"), args.end());
+        //const std::string leftPath = args.size() >= 2 ? args[0] : "data/left_027.png";
+        //const std::string rightPath = args.size() >= 2 ? args[1] : "data/right_027.png";
+        //const std::string outDir = "results";
+        //std::filesystem::create_directories(outDir);
 
-        pe::Config cfg;   // all parameters, see src/config/Config.hpp
+        //pe::Config cfg;   // all parameters, see src/config/Config.hpp
 
-        // ---- input ----
-        const cv::Mat left = loadGray(leftPath);
-        const cv::Mat right = loadGray(rightPath);
-        std::cout << "Images: " << left.cols << " x " << left.rows << "\n";
+        //// ---- input ----
+        //const cv::Mat left = loadGray(leftPath);
+        //const cv::Mat right = loadGray(rightPath);
+        //std::cout << "Images: " << left.cols << " x " << left.rows << "\n";
 
-        // ---- Step 1: Shi-Tomasi corners in the left image ----
-        cv::Mat score;
-        const int border = cfg.stereo.half + 1;   // Step 2 needs a full patch around each corner
-        const auto corners = timed("Step 1 corners", [&] {
-            return pe::detectCorners(left, cfg.corners, border, &score);
-        });
+        //// ---- Step 1: Shi-Tomasi corners in the left image ----
+        //cv::Mat score;
+        //const int border = cfg.stereo.half + 1;   // Step 2 needs a full patch around each corner
+        //const auto corners = timed("Step 1 corners", [&] {
+        //    return pe::detectCorners(left, cfg.corners, border, &score);
+        //});
 
-        std::cout << "Step 1: " << corners.size() << " corners\n";
-        const cv::Mat scoreImg = normImage(score);
-        const cv::Mat cornerImg = drawCorners(left, corners);
-        cv::imwrite(outDir + "/step1_score.png", scoreImg);
-        cv::imwrite(outDir + "/step1_corners.png", cornerImg);
+        //std::cout << "Step 1: " << corners.size() << " corners\n";
+        //const cv::Mat scoreImg = normImage(score);
+        //const cv::Mat cornerImg = drawCorners(left, corners);
+        //cv::imwrite(outDir + "/step1_score.png", scoreImg);
+        //cv::imwrite(outDir + "/step1_corners.png", cornerImg);
 
-        // ---- Step 2: stereo matching ----
-        pe::MatchStats st;
-        const auto matches = timed("Step 2 matching", [&] {
-            return pe::matchCorners(left, right, corners, cfg.stereo, &st);
-        });
-        std::cout << "Step 2: " << st.matched << " of " << st.corners << " corners matched\n"
-                  << "  rejected: " << st.noPeak << " no valid peak, " << st.lowScore << " low ZNCC, "
-                  << st.ambiguous << " ambiguous, " << st.failedLR << " failed left-right check\n";
-        const cv::Mat matchImg = drawMatches(left, right, matches, cfg.stereo);
-        //saveMatchesCsv(outDir + "/matches.csv", matches);
-        cv::imwrite(outDir + "/step2_matches.png", matchImg);
+        //// ---- Step 2: stereo matching ----
+        //pe::MatchStats st;
+        //const auto matches = timed("Step 2 matching", [&] {
+        //    return pe::matchCorners(left, right, corners, cfg.stereo, &st);
+        //});
+        //std::cout << "Step 2: " << st.matched << " of " << st.corners << " corners matched\n"
+        //          << "  rejected: " << st.noPeak << " no valid peak, " << st.lowScore << " low ZNCC, "
+        //          << st.ambiguous << " ambiguous, " << st.failedLR << " failed left-right check\n";
+        //const cv::Mat matchImg = drawMatches(left, right, matches, cfg.stereo);
+        ////saveMatchesCsv(outDir + "/matches.csv", matches);
+        //cv::imwrite(outDir + "/step2_matches.png", matchImg);
 
-        // ---- Step 3 onwards: triangulation, cube segmentation, planes, pose ----
-        // (next modules: src/reconstruction, src/geometry, ...)
-        std::vector<cv::Point3d> cluster = pe::dbScan(matches, cfg.camera, 25, 4);
-        std::vector<pe::Plane> faces = pe::fitFaces(cluster, cfg.planes);
+        //// ---- Step 3 onwards: triangulation, cube segmentation, planes, pose ----
+        //// (next modules: src/reconstruction, src/geometry, ...)
+        //std::vector<cv::Point3d> cluster = pe::dbScan(matches, cfg.camera, 25, 4);
+        //std::vector<pe::Plane> faces = pe::fitFaces(cluster, cfg.planes);
 
-        std::cout << "FACES: " << faces.size() << std::endl;
+        //std::cout << "FACES: " << faces.size() << std::endl;
 
-        showFaces(left, faces, cluster, cfg.camera);
+        //showFaces(left, faces, cluster, cfg.camera);
 
-        // ---- Step 6: cube pose (initial guess from the normals, LM on point-to-face distances) ----
-        std::vector<int> poseLabels;
-        const pe::CubePose pose = timed("Step 6 pose", [&] {
-            return pe::estimatePose(cluster, faces, cfg.pose, &poseLabels);
-        });
-        if (pose.valid) {
-            int perFace[3] = {0, 0, 0};
-            for (int l : poseLabels) if (l >= 0) ++perFace[l];
-            std::cout << "Step 6: centre t = (" << pose.t[0] << ", " << pose.t[1] << ", " << pose.t[2] << ") mm\n"
-                      << "  axes A (columns) =\n" << pose.A << "\n"
-                      << "  RMS " << pose.rms << " mm, " << pose.inliers << "/" << pose.points
-                      << " points within " << cfg.pose.inlierTol << " mm, points per face "
-                      << perFace[0] << "/" << perFace[1] << "/" << perFace[2] << "\n";
-        } else {
-            std::cout << "Step 6: fewer than 2 faces, no pose\n";
-        }
+        //// ---- Step 6: cube pose (initial guess from the normals, LM on point-to-face distances) ----
+        //std::vector<int> poseLabels;
+        //const pe::CubePose pose = timed("Step 6 pose", [&] {
+        //    return pe::estimatePose(cluster, faces, cfg.pose, &poseLabels);
+        //});
+        //if (pose.valid) {
+        //    int perFace[3] = {0, 0, 0};
+        //    for (int l : poseLabels) if (l >= 0) ++perFace[l];
+        //    std::cout << "Step 6: centre t = (" << pose.t[0] << ", " << pose.t[1] << ", " << pose.t[2] << ") mm\n"
+        //              << "  axes A (columns) =\n" << pose.A << "\n"
+        //              << "  RMS " << pose.rms << " mm, " << pose.inliers << "/" << pose.points
+        //              << " points within " << cfg.pose.inlierTol << " mm, points per face "
+        //              << perFace[0] << "/" << perFace[1] << "/" << perFace[2] << "\n";
+        //} else {
+        //    std::cout << "Step 6: fewer than 2 faces, no pose\n";
+        //}
 
-        std::cout << "Results written to " << outDir << "/\n";
-        if (show) {
-            cv::imshow("Step 1 - score", scoreImg);
-            cv::imshow("Step 1 - corners", cornerImg);
-            cv::imshow("Step 2 - matches", matchImg);
-            cv::waitKey(0);   // any key closes the windows
-        }
+        //std::cout << "Results written to " << outDir << "/\n";
+        //if (show) {
+        //    cv::imshow("Step 1 - score", scoreImg);
+        //    cv::imshow("Step 1 - corners", cornerImg);
+        //    cv::imshow("Step 2 - matches", matchImg);
+        //    cv::waitKey(0);   // any key closes the windows
+        //}
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
