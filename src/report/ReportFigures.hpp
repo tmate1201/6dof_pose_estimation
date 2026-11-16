@@ -58,3 +58,14 @@ namespace pe::report {
     int writePoseSequenceReport(const std::string& dataDir, const std::string& outDir, int first = 26, int last = 30);
 
 }  // namespace pe::report
+
+namespace pe::report {
+
+    // Same for the "Face Identification" subsection (Step 7). Writes to <outDir>:
+    //   rubik_face_id.png       (3D points by face, fitted cube, model stickers in the colours of the
+    //                            chosen rotation, model axes x/y/z = red/green/blue)
+    //   face_id_values.txt      (all numbers of the section; also printed to the console)
+    // Reads the cube model from <dataDir>/rubik_model.json.
+    int writeFaceIdReport(const std::string& dataDir, const std::string& outDir);
+
+}  // namespace pe::report

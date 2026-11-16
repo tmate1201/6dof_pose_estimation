@@ -75,7 +75,6 @@ namespace pe {
 
     bool solve6(cv::Matx66d H, cv::Vec6d g, cv::Vec6d& x) {
 
-        // solves H * x = g; refineLM passes -g as g, so no sign change here
         cv::Vec6d b = g;
 
         const double EPS = 1e-12;
@@ -241,13 +240,13 @@ namespace pe {
         double lambda = p.lambda0;
 
         for (int it = 0; it < p.lmIterations; ++it) {
-            // ---- 1. Huber weights from the current residuals: 1 if |r| < delta, else delta/|r|
+            // Huber weights from the current residuals: 1 if |r| < delta, else delta/|r|
             std::vector<double> w(pts.size(), 0.0);
             for (size_t i = 0; i < pts.size(); ++i)
                 if (label[i] >= 0)
                     w[i] = std::abs(r[i]) < p.huber ? 1.0 : p.huber / std::abs(r[i]);
 
-            // ---- 2. normal equations: H = sum w J^T J,  g = sum w J^T r,  cost = sum w r^2
+            // normal equations: H = sum w J^T J,  g = sum w J^T r,  cost = sum w r^2
             cv::Matx66d H = cv::Matx66d::zeros();
             cv::Vec6d g(0, 0, 0, 0, 0, 0);
             double cost = 0.0;
@@ -265,14 +264,14 @@ namespace pe {
                 cost += w[i] * r[i] * r[i];
             }
 
-            // ---- 3. damped step; grow lambda until the step lowers the cost
+            // damped step; grow lambda until the step lowers the cost
             bool accepted = false;
             cv::Vec6d dx(0, 0, 0, 0, 0, 0);
             while (lambda <= 1e6) {
                 cv::Matx66d Hd = H;
                 for (int j = 0; j < 6; ++j) Hd(j, j) += lambda * (H(j, j) + 1e-9);   // H + lambda diag(H)
                 if (solve6(Hd, -g, dx)) {
-                    if (!thirdFace) {                                   // NEW: no step along the hidden axis
+                    if (!thirdFace) {                                   // no step along the hidden axis, when there are only 2 detected faces
                         const cv::Vec3d h = col(pose.A, 2);
                         const double s = dx[3] * h[0] + dx[4] * h[1] + dx[5] * h[2];
                         dx[3] -= s * h[0];
@@ -297,7 +296,7 @@ namespace pe {
                 lambda *= 10.0;                                                     // worse: damp more
             }
 
-            // ---- 4. stop when no step helps any more, or the step became negligible
+            // stop when no step helps any more, or the step became negligible
             if (!accepted) break;
             double step = 0.0;
             for (int j = 0; j < 6; ++j) step += dx[j] * dx[j];
@@ -331,7 +330,7 @@ namespace pe {
     // Step 6: labels -> initial pose -> LM -> (reassign -> LM) x reassignRounds -> quality
     CubePose estimatePose(const std::vector<cv::Point3d>& pts, std::vector<Plane> faces, const PoseParams& p, std::vector<int>* labelsOut) {
 
-        std::vector<int> label = faceLabels(pts, faces);              // also fixes the face order
+        std::vector<int> label = faceLabels(pts, faces);           
         CubePose pose = initialPose(pts, label, faces, p.edge);
         if (!pose.valid)
             return pose;                                               // fewer than 2 faces

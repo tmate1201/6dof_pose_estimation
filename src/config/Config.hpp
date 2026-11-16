@@ -1,6 +1,7 @@
 #pragma once
 // Every tunable number of the pipeline in one place.
 // Add a new struct here for each new step (triangulation, plane fitting, ...).
+#include <string>
 
 namespace pe {
 
@@ -63,6 +64,8 @@ namespace pe {
         double minCos = 0.3;          // sticker visible if its normal faces the camera at least this much
         double windowFrac = 0.2;      // sampling window radius as a fraction of a sticker (19 mm)
         double shiftRange = 25.0;     // mm, only used if a cube axis has no visible face
+        double minMargin = 0.2;       // result is valid only if best - second best score >= this
+        double plateauTol = 0.02;     // 2-face shift: scores within this of the best count as equally good
     };
 
 

@@ -28,8 +28,8 @@ namespace {
 
     // ---------------------------------------------------------------- settings
     // Image pair used for the report (in dataDir)
-    const std::string kLeftFile = "left_027.png";
-    const std::string kRightFile = "right_027.png";
+    const std::string kLeftFile = "left_035.png";
+    const std::string kRightFile = "right_035.png";
 
     // Crop used for all cropped figures (left image): x 420..1099, y 230..679
     const cv::Rect kCrop(420, 230, 680, 450);
@@ -1283,6 +1283,202 @@ int writePoseSequenceReport(const std::string& dataDir, const std::string& outDi
     std::ofstream(outDir + "/pose_sequence_values.txt") << o.str();
     std::cout << "Pose sequence report written to " << outDir << "/\n";
     return frames.size() >= 2 ? 0 : 1;
+}
+
+}  // namespace pe::report
+
+
+// ======================================================================= Step 7: face identification
+namespace pe::report {
+namespace {
+
+    // Display colour (BGR) of a sticker colour letter
+    cv::Scalar stickerColour(char c) {
+        switch (c) {
+            case 'W': return {245, 245, 245};
+            case 'Y': return {0, 215, 255};
+            case 'R': return {30, 30, 215};
+            case 'O': return {0, 140, 255};
+            case 'G': return {50, 170, 40};
+            default:  return {210, 110, 20};   // 'B'
+        }
+    }
+
+    cv::Point3d toPoint(const cv::Vec3d& v) { return {v[0], v[1], v[2]}; }
+
+}  // namespace
+
+int writeFaceIdReport(const std::string& dataDir, const std::string& outDir) {
+    const cv::Mat left = loadGray(dataDir + "/" + kLeftFile);
+    const cv::Mat right = loadGray(dataDir + "/" + kRightFile);
+    if (left.empty() || right.empty()) {
+        std::cerr << "writeFaceIdReport: cannot read images in " << dataDir << "\n";
+        return 1;
+    }
+    std::filesystem::create_directories(outDir);
+
+    Config cfg{};
+    const CameraParams& cam = cfg.camera;
+    FaceIdParams fp;
+    fp.modelPath = dataDir + "/rubik_model.json";
+
+    // ---- Steps 1-6 as in main()
+    const std::vector<Corner> corners = detectCorners(left, cfg.corners, cfg.stereo.half + 1);
+    const std::vector<StereoMatch> ms = matchCorners(left, right, corners, cfg.stereo);
+    const std::vector<cv::Point3d> cube = dbScan(ms, cfg.camera, kDbEps, kDbMinPts);
+    std::vector<Plane> faces = fitFaces(cube, cfg.planes);
+    faceLabels(cube, faces);                                             // same face order as the columns of A
+    std::vector<int> labels;
+    const CubePose pose = estimatePose(cube, faces, cfg.pose, &labels);
+    const int nFaces = static_cast<int>(faces.size());
+    if (!pose.valid) {
+        std::cerr << "writeFaceIdReport: fewer than 2 faces, no pose\n";
+        return 1;
+    }
+
+    // ---- Step 7
+    CubeModel model;
+    if (!loadModel(fp.modelPath, model)) {
+        std::cerr << "writeFaceIdReport: cannot read " << fp.modelPath << "\n";
+        return 1;
+    }
+    const std::vector<cv::Matx33d> rots = cubeRotations();
+    const std::vector<std::vector<int>> perm = stickerPermutations(rots, model.centres);
+    std::vector<double> scores;
+    int gBest = -1;
+    const Orientation o = identifyFaces(left, pose, nFaces, model, rots, perm, cam, fp, &scores, &gBest);
+    if (gBest < 0) {
+        std::cerr << "writeFaceIdReport: too few visible stickers\n";
+        return 1;
+    }
+
+    // the measurement behind the result, at the chosen centre
+    CubePose shifted = pose;
+    shifted.t = o.t;
+    std::vector<int> index;
+    const std::vector<Slot> slots = visibleSlots(model.centres, shifted, model.edge, fp.minCos, index);
+    const std::vector<double> b = sampleBrightness(left, slots, cam, fp.windowFrac);
+    const std::vector<double> zs = zScorePerFace(b, slots);
+
+    // ---- figure: 3D points by face, fitted cube, model stickers in their colours, model axes
+    std::vector<cv::Point3d> all;
+    for (const StereoMatch& m : ms) all.push_back(triangulate(m, cam));
+    const Zoom z = zoomAround(cube, cam, left.size(), 90, 1.25);
+    cv::Mat img = zoomedBackground(left, z);
+    const cv::Rect frame(0, 0, img.cols, img.rows);
+
+    std::vector<std::string> names;
+    for (const Plane& f : faces) names.push_back(faceName(f.normal));
+    auto star = [&](const cv::Point3d& P, const cv::Scalar& c) {
+        const cv::Point p = z.pt(project(P, cam));
+        if (frame.contains(p)) cv::drawMarker(img, p, c, cv::MARKER_STAR, 9, 2, cv::LINE_AA);
+    };
+    for (const cv::Point3d& P : all) {                                    // points not on the cube: grey
+        bool onCube = false;
+        for (const cv::Point3d& Q : cube) if (cv::norm(P - Q) < 1e-9) { onCube = true; break; }
+        if (!onCube) star(P, {110, 110, 110});
+    }
+    for (size_t i = 0; i < cube.size(); ++i)
+        star(cube[i], labels[i] >= 0 ? faceColour(names[labels[i]]) : cv::Scalar(110, 110, 110));
+
+    // cube wireframe: edges of the faces that point towards the camera
+    const double h = model.edge / 2.0;
+    auto cornerPt = [&](int i) {                                          // corner i: bit k = sign along axis k
+        cv::Vec3d c = o.t;
+        for (int k = 0; k < 3; ++k) c += ((i >> k) & 1 ? h : -h) * col(o.R, k);
+        return z.pt(project(toPoint(c), cam));
+    };
+    bool faceVisible[3][2];
+    for (int k = 0; k < 3; ++k)
+        for (int s = 0; s < 2; ++s) {
+            const cv::Vec3d n = (s ? 1.0 : -1.0) * col(o.R, k);
+            const cv::Vec3d centre = o.t + h * n;
+            faceVisible[k][s] = n.dot(-centre) > 0.0;
+        }
+    for (int a = 0; a < 8; ++a)
+        for (int c = a + 1; c < 8; ++c) {
+            const int diff = a ^ c;
+            if (diff != 1 && diff != 2 && diff != 4) continue;            // not an edge
+            bool visible = false;                                         // edge lies on a visible face
+            for (int k = 0; k < 3; ++k)
+                if (!(diff >> k & 1) && faceVisible[k][a >> k & 1]) visible = true;
+            if (visible) cv::line(img, cornerPt(a), cornerPt(c), {0, 230, 255}, 2, cv::LINE_AA);
+        }
+
+    // model stickers that face the camera, in the colour the chosen rotation gives them
+    int shown = 0;
+    for (size_t i = 0; i < model.centres.size(); ++i) {
+        const cv::Vec3d& m = model.centres[i];
+        cv::Vec3d n(0, 0, 0);
+        for (int k = 0; k < 3; ++k) if (std::abs(std::abs(m[k]) - h) < 1e-6) n[k] = m[k] > 0 ? 1.0 : -1.0;
+        const cv::Vec3d p = o.R * m + o.t;
+        if ((o.R * n).dot(-p / cv::norm(p)) <= fp.minCos) continue;
+        const cv::Point q = z.pt(project(toPoint(p), cam));
+        cv::circle(img, q, 9, {0, 0, 0}, cv::FILLED, cv::LINE_AA);
+        cv::circle(img, q, 7, stickerColour(model.colours[i]), cv::FILLED, cv::LINE_AA);
+        ++shown;
+    }
+
+    // model axes from the centre: x red, y green, z blue
+    const cv::Point c0 = z.pt(project(toPoint(o.t), cam));
+    const cv::Scalar axisColour[3] = {{0, 0, 230}, {0, 200, 0}, {230, 60, 0}};
+    for (int k = 0; k < 3; ++k) {
+        const cv::Point c1 = z.pt(project(toPoint(o.t + 1.1 * model.edge * col(o.R, k)), cam));
+        cv::arrowedLine(img, c0, c1, {0, 0, 0}, 5, cv::LINE_AA, 0, 0.12);
+        cv::arrowedLine(img, c0, c1, axisColour[k], 3, cv::LINE_AA, 0, 0.12);
+    }
+    std::ostringstream lab;
+    lab << std::fixed << std::setprecision(2) << "Best rotation: score " << o.best << " (second " << o.second << ")";
+    label(img, lab.str());
+    cv::imwrite(outDir + "/rubik_face_id.png", img);
+
+    // ---- values
+    std::vector<double> sorted = scores;
+    std::sort(sorted.rbegin(), sorted.rend());
+    const char* modelFaces[6] = {"R (+x)", "L (-x)", "U (+y)", "D (-y)", "F (+z)", "B (-z)"};
+    std::ostringstream o2;
+    o2 << std::fixed;
+    o2 << "Face identification report values (" << kLeftFile << " / " << kRightFile << ")\n"
+       << "Parameters: visibility cos > " << std::setprecision(2) << fp.minCos << ", window radius "
+       << fp.windowFrac << " x sticker, shift range +-" << std::setprecision(0) << fp.shiftRange
+       << " mm, min margin " << std::setprecision(2) << fp.minMargin << "\n\n"
+       << "Faces from step 6: " << nFaces << (nFaces == 2 ? " (centre searched along the unseen axis)" : "") << "\n"
+       << "Visible stickers used: " << o.visible << ", drawn: " << shown << "\n"
+       << "Window radius at the cube centre: "
+       << std::max(2L, std::lround(fp.windowFrac * 19.0 * cam.fx / o.t[2])) << " px\n"
+       << "Scores: best " << std::setprecision(3) << sorted[0] << ", second " << sorted[1] << ", third " << sorted[2]
+       << ", margin " << sorted[0] - sorted[1] << (o.valid ? " (valid)" : " (NOT valid: below min margin)") << "\n"
+       << "Centre shift by the sticker pattern: " << std::setprecision(1) << cv::norm(o.t - pose.t) << " mm\n"
+       << "Centre t = (" << o.t[0] << ", " << o.t[1] << ", " << o.t[2] << ") mm\n";
+
+    o2 << "Model faces towards the camera:";
+    for (int k = 0; k < 3; ++k)
+        for (int s = 0; s < 2; ++s) {
+            const cv::Vec3d n = (s == 0 ? 1.0 : -1.0) * col(o.R, k);     // model face normal, camera frame
+            const cv::Vec3d centre = o.t + h * n;
+            if (n.dot(-centre) > fp.minCos * cv::norm(centre)) o2 << " " << modelFaces[2 * k + s];
+        }
+    o2 << "\n";
+
+    // mean standardised brightness per predicted IR class: should be ordered bright > medium > dark
+    double zSum[3] = {0, 0, 0};
+    int zN[3] = {0, 0, 0};
+    for (size_t v = 0; v < slots.size(); ++v) {
+        if (std::isnan(zs[v])) continue;
+        const int c = irClass(model.colours[perm[gBest][index[v]]]);
+        zSum[c] += zs[v]; ++zN[c];
+    }
+    o2 << "Mean z per predicted IR class: bright (W,Y) " << std::setprecision(2) << (zN[2] ? zSum[2] / zN[2] : 0.0)
+       << " [" << zN[2] << "], medium (R,O) " << (zN[1] ? zSum[1] / zN[1] : 0.0) << " [" << zN[1]
+       << "], dark (G,B) " << (zN[0] ? zSum[0] / zN[0] : 0.0) << " [" << zN[0] << "]\n";
+    o2 << "R (model -> camera):\n";
+    for (int i = 0; i < 3; ++i)
+        o2 << "    " << std::setprecision(4) << o.R(i, 0) << "  " << o.R(i, 1) << "  " << o.R(i, 2) << "\n";
+
+    std::cout << o2.str();
+    std::ofstream(outDir + "/face_id_values.txt") << o2.str();
+    std::cout << "Face identification report written to " << outDir << "/\n";
+    return 0;
 }
 
 }  // namespace pe::report

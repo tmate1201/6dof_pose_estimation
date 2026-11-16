@@ -10,14 +10,12 @@ namespace pe {
 
     cv::Matx33d skew(const cv::Vec3d& w);                         // [w]x
     cv::Matx33d rodrigues(const cv::Vec3d& w);                    // exp([w]x)
-    cv::Matx33d nearestRotation(const cv::Matx33d& N, bool dirty = false);            // polar iteration X <- (X + X^-T)/2
+    cv::Matx33d nearestRotation(const cv::Matx33d& N, bool dirty = false);        
     bool solve6(cv::Matx66d H, cv::Vec6d g, cv::Vec6d& x);        // H x = g, Gaussian elimination
 
     inline cv::Vec3d col(const cv::Matx33d& M, int k) { return { M(0, k), M(1, k), M(2, k) }; }
     inline cv::Vec3d vec(const cv::Point3d& p) { return { p.x, p.y, p.z }; }
 
-    // --- step 6 ---
-    // label[i] = face index of point i (-1 = none); reorders faces to a right-handed set
     std::vector<int> faceLabels(const std::vector<cv::Point3d>& pts, std::vector<Plane>& faces);
 
     CubePose initialPose(const std::vector<cv::Point3d>& pts, const std::vector<int>& label, const std::vector<Plane>& faces, double edge);
